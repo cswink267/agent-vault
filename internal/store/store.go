@@ -88,6 +88,10 @@ CREATE TABLE IF NOT EXISTS audit (
   action TEXT NOT NULL,
   secret_name TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 `
 
 func Open(path string) (*Store, error) {

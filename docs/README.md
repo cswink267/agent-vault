@@ -18,7 +18,7 @@ Then skim **[Concepts](concepts.md)** so passphrase / `unseal.key` / tokens make
 | Guide | Who it’s for | What you’ll learn |
 |-------|--------------|-------------------|
 | [Concepts](concepts.md) | Everyone | Encryption, seal/unseal, tokens, scopes, naming |
-| [Install & operations](install-and-ops.md) | Operators | Docker, first boot, HTTPS, env vars, upgrades, common problems |
+| [Install & operations](install-and-ops.md) | Operators | Docker, first boot, HTTPS, env migration/hydrate, upgrades, troubleshooting |
 | [Admin UI](admin-ui.md) | Humans | Browser login, Settings, snapshots/exports from the UI |
 | [CLI](cli.md) | Humans & agents | Every `vault` command with examples |
 | [HTTP API](api.md) | Integrators & agents | Every `/v1` route with curl |
@@ -46,3 +46,4 @@ When the vault is running, the same guides are available under **Docs** in the t
 | Mint an agent token | `vault token create --label my-agent --scope agent` |
 | Universal agent skill | [`../skills/SKILL.md`](../skills/SKILL.md) |
 | MCP stdio example | [`../skills/mcp.stdio.json.example`](../skills/mcp.stdio.json.example) |
+| Hydrate scrubbed `.env` from vault | [`../scripts/vault-hydrate`](../scripts/vault-hydrate) + [`env.map.example`](../scripts/examples/env.map.example) |

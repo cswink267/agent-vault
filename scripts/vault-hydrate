@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# Fill a scrubbed dotenv file from Agent Vault using a KEY=vault.name map.
+#
+# Prerequisites: curl, python3, AGENT_VAULT_URL, AGENT_VAULT_TOKEN (agent scope is enough).
+#
+# Map format (one per line, # comments ok):
+#   OPENAI_API_KEY=openai.api_key
+#   DISCORD_BOT_TOKEN=discord.bot_token
+#
+# Usage:
+#   export AGENT_VAULT_URL=http://localhost:8200
+#   export AGENT_VAULT_TOKEN=avt_…
+#   ./scripts/vault-hydrate --map path/to/app.env.map --file path/to/.env
+#   ./scripts/vault-hydrate --map app.env.map --out /tmp/app.env   # write only
+#
+# Optional: if --file is set and --map is omitted, looks for
+#   $AGENT_VAULT_ENV_MAPS/<file-rel-to-home-with-__>.map
+#   (default AGENT_VAULT_ENV_MAPS=$HOME/.config/agent-vault/env-maps)
+set -euo pipefail
+
+ENV_FILE=""
+MAP_FILE=""
+OUT_FILE=""
+
+usage() {
+  sed -n '2,20p' "$0"
+  exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --file) ENV_FILE="$2"; shift 2 ;;
+    --map) MAP_FILE="$2"; shift 2 ;;
+    --out) OUT_FILE="$2"; shift 2 ;;
+    -h|--help) usage ;;
+    *) echo "unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
+
+: "${AGENT_VAULT_URL:=http://localhost:8200}"
+: "${AGENT_VAULT_ENV_MAPS:=$HOME/.config/agent-vault/env-maps}"
+
+if [[ -z "${AGENT_VAULT_TOKEN:-}" && -f "${HOME}/.config/agent-vault/env" ]]; then
+  # shellcheck disable=SC1091
+  . "${HOME}/.config/agent-vault/env"
+fi
+[[ -n "${AGENT_VAULT_TOKEN:-}" ]] || {
+  echo "AGENT_VAULT_TOKEN required (export it, or put it in ~/.config/agent-vault/env)" >&2
+  exit 1
+}
+
+if [[ -n "$ENV_FILE" && -z "$MAP_FILE" ]]; then
+  # Resolve to absolute then strip $HOME/ for map lookup
+  abs="$(cd "$(dirname "$ENV_FILE")" && pwd)/$(basename "$ENV_FILE")"
+  rel="${abs#"$HOME"/}"
+  MAP_FILE="${AGENT_VAULT_ENV_MAPS}/${rel//\//__}.map"
+fi
+
+[[ -n "${MAP_FILE:-}" && -f "$MAP_FILE" ]] || {
+  echo "map not found: ${MAP_FILE:-"(none)"}" >&2
+  echo "pass --map KEY=vault.name file, or set AGENT_VAULT_ENV_MAPS" >&2
+  exit 1
+}
+
+OUT_FILE="${OUT_FILE:-$ENV_FILE}"
+[[ -n "$OUT_FILE" ]] || {
+  echo "need --out or --file" >&2
+  exit 1
+}
+
+command -v curl >/dev/null || { echo "curl required" >&2; exit 1; }
+command -v python3 >/dev/null || { echo "python3 required" >&2; exit 1; }
+
+tmp="$(mktemp)"
+chmod 600 "$tmp"
+if [[ -n "$ENV_FILE" && -f "$ENV_FILE" ]]; then
+  cp "$ENV_FILE" "$tmp"
+else
+  : >"$tmp"
+fi
+
+filled=0
+while IFS= read -r line || [[ -n "$line" ]]; do
+  [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+  key="${line%%=*}"
+  vname="${line#*=}"
+  key="${key%"${key##*[![:space:]]}"}"
+  key="${key#"${key%%[![:space:]]*}"}"
+  vname="${vname%"${vname##*[![:space:]]}"}"
+  vname="${vname#"${vname%%[![:space:]]*}"}"
+  [[ -n "$key" && -n "$vname" ]] || continue
+
+  if ! val="$(curl -fsS -H "Authorization: Bearer ${AGENT_VAULT_TOKEN}" \
+    "${AGENT_VAULT_URL%/}/v1/secrets/${vname}?reveal=1" \
+    | python3 -c 'import sys,json; print(json.load(sys.stdin).get("secret") or "")')"; then
+    echo "failed to fetch vault:${vname} for ${key}" >&2
+    rm -f "$tmp"
+    exit 1
+  fi
+
+  KEY="$key" VAL="$val" FILE="$tmp" python3 - <<'PY'
+import os
+from pathlib import Path
+
+path = Path(os.environ["FILE"])
+key = os.environ["KEY"]
+val = os.environ["VAL"]
+lines = path.read_text().splitlines()
+out, found = [], False
+for ln in lines:
+    s = ln.strip()
+    if not s or s.startswith("#") or "=" not in s:
+        out.append(ln)
+        continue
+    k = s.split("=", 1)[0].strip()
+    if k == key:
+        out.append(f"{key}={val}")
+        found = True
+    else:
+        out.append(ln)
+if not found:
+    out.append(f"{key}={val}")
+path.write_text("\n".join(out) + ("\n" if out else ""))
+PY
+  filled=$((filled + 1))
+done <"$MAP_FILE"
+
+umask 077
+mv "$tmp" "$OUT_FILE"
+chmod 600 "$OUT_FILE"
+echo "hydrated ${OUT_FILE} (${filled} keys) from ${MAP_FILE}" >&2

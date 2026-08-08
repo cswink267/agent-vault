@@ -156,6 +156,17 @@ vault token revoke --id <id>
 - Add tags for the consuming agent or environment: `["cursor","prod"]`.
 - Types: `api_key` | `login` | `ssh_key` | `token` | `note`.
 
+## Moving secrets out of local env files
+
+When the human (or you) finds passwords/API keys sitting in `.env` or similar:
+
+1. Store them in the vault under stable names (`vault_set` / `vault set`).
+2. Scrub the local file (empty values; optional `# vault:name` comments).
+3. Prefer fetching via MCP/CLI at use time — do not re-create long-lived plaintext dumps.
+4. If a process still requires a classic dotenv at startup, the operator can refill it with [`scripts/vault-hydrate`](../scripts/vault-hydrate) and a non-secret `KEY=vault.name` map (see [Install & operations → Migrating secrets](install-and-ops.md#migrating-secrets-out-of-local-env-files)).
+
+Never print full secret values while migrating.
+
 ## Cloud / remote agents
 
 1. Operator enables HTTPS in Settings (see [Install](install-and-ops.md)).

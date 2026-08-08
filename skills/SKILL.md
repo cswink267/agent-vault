@@ -78,6 +78,10 @@ curl -sS -H "Authorization: Bearer $AGENT_VAULT_TOKEN" \
 - Names: `service.credential` (`github.token`, `postgres.login`)
 - Types: `api_key` | `login` | `ssh_key` | `token` | `note`
 
+## Local `.env` files
+
+If credentials still live in dotenv files: store them in the vault, scrub the file, prefer MCP/CLI at use time. Operators who must refill a classic `.env` for process startup can use `scripts/vault-hydrate` with a non-secret `KEY=vault.name` map (see `docs/install-and-ops.md`).
+
 ## Out of scope for agents
 
 Do not run backup, restore, export, import, change-passphrase, or rotate-master unless the user explicitly asks **and** you have an admin token. Those are operator workflows.

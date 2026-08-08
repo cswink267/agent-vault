@@ -141,4 +141,9 @@ vault get github.token
 
 # Operator: mint a token for a new agent
 vault token create --label windsurf --scope agent
+
+# Refill a scrubbed dotenv from vault names (helper script, not a vault subcommand):
+# ./scripts/vault-hydrate --map app.env.map --file path/to/.env
 ```
+
+See [Install → Migrating secrets](install-and-ops.md#migrating-secrets-out-of-local-env-files) for the full migrate/scrub/hydrate flow.

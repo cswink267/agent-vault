@@ -196,6 +196,31 @@ bash scripts/smoke-settings.sh
 4. Remint agent tokens only if you rotated passphrase/master or revoked tokens.
 5. Refresh local `vault` / `vault-mcp` binaries if you keep copies outside the container (for example on your `PATH`).
 
+## Migrating secrets out of local `.env` files
+
+Agent Vault is meant to replace long-lived plaintext credential files. A safe operator pattern:
+
+1. **Inventory** — List unique secret values in active dotenv files (skip examples/templates).
+2. **Store** — `vault set` / MCP `vault_set` / `POST /v1/secrets` with stable names (`openai.api_key`, `discord.bot_token`). Prefer **agent**-scoped tokens for this.
+3. **Map** — Keep a non-secret map file: each line `ENV_KEY=vault.secret.name` (see [`scripts/examples/env.map.example`](../scripts/examples/env.map.example)).
+4. **Scrub** — Empty the secret values in the dotenv (or delete the lines). Leave a comment like `# vault:openai.api_key` so humans know where it went. Do **not** commit pre-scrub backups.
+5. **Hydrate only when a process still needs classic env** — Prefer agents fetching via MCP/CLI at runtime. If a gateway or app still reads `.env` at startup, refill just before restart:
+
+```bash
+export AGENT_VAULT_URL=http://localhost:8200
+export AGENT_VAULT_TOKEN=avt_…   # agent scope is enough
+
+# From a clone of this repo:
+./scripts/vault-hydrate --map path/to/app.env.map --file path/to/.env
+
+# Or write to a temp file and point the process at that:
+./scripts/vault-hydrate --map path/to/app.env.map --out /tmp/app.env
+```
+
+Optional convenience: if maps live under `$HOME/.config/agent-vault/env-maps/` named from the env path (`home__svc__.env.map` style), you can pass only `--file` and set `AGENT_VAULT_ENV_MAPS` (default is that directory).
+
+**Do not** leave revealed values in git, chat logs, or `*.bak` next to the scrubbed file after you confirm hydrate works.
+
 ## Troubleshooting
 
 | Symptom | Likely cause | What to do |
@@ -206,5 +231,10 @@ bash scripts/smoke-settings.sh
 | Cert never issues | Cloudflare orange-cloud / wrong DNS | Set DNS only (grey cloud); confirm A/AAAA points at this host |
 | `503` on secret routes | Vault sealed | Unlock with passphrase in UI or `vault unlock` |
 | Agent gets `403` on backup/token routes | Token is `agent` scope | Expected — mint an admin token only for operator tasks |
+| MCP / CLI still uses an old token after rotate or remint | Host cached the previous MCP env | Restart the IDE/agent host, or disable/re-enable the `agent-vault` MCP server so it reloads `AGENT_VAULT_TOKEN` |
+| Sign in button does nothing / blank console CSP errors | Stale UI build blocking inline boot scripts | Pull latest image/build; Admin UI must boot from external `app.js` under `script-src 'self'` |
+| App starts but API keys are empty after scrubbing `.env` | Forgot to hydrate (or process only reads env at boot) | Run [`scripts/vault-hydrate`](../scripts/vault-hydrate) before restart, or change the app to fetch from the vault at runtime |
+| `vault-hydrate` → map not found | Wrong `--map` path or `AGENT_VAULT_ENV_MAPS` layout | Pass `--map` explicitly; see map example under `scripts/examples/` |
+| `vault-hydrate` → failed to fetch `vault:name` | Name missing, vault sealed, or bad token | `vault search` / `vault list`; unlock if sealed; confirm token can `GET /v1/secrets` |
 | Forgot passphrase | No recovery from passphrase alone | Restore from an AVS2 snapshot (needs snapshot passphrase) or from a known `unseal.key` + DB backup |
 | Root token lost | File deleted / never copied | If vault is unsealed and you still have an admin token, mint a new admin token; otherwise restore from snapshot |

@@ -43,12 +43,12 @@ AGENT_VAULT_DATA_DIR="$DATA_DIR" PORT="$PORT" "$BIN_DIR/vault-server" &
 PID=$!
 
 for _ in $(seq 1 30); do
-  if curl -sf "$AGENT_VAULT_URL/health" | grep -q '"sealed":false'; then
+  if curl -sf "$AGENT_VAULT_URL/health" | grep -q '"ok":true'; then
     break
   fi
   sleep 0.2
 done
-curl -sf "$AGENT_VAULT_URL/health" | grep -q '"sealed":false'
+curl -sf "$AGENT_VAULT_URL/health" | grep -q '"ok":true'
 
 "$BIN_DIR/vault" set \
   --name "$SECRET_NAME" \
@@ -75,12 +75,12 @@ AGENT_VAULT_DATA_DIR="$RESTORE_DIR" PORT="$PORT2" "$BIN_DIR/vault-server" &
 PID2=$!
 
 for _ in $(seq 1 30); do
-  if curl -sf "$AGENT_VAULT_URL/health" | grep -q '"sealed":false'; then
+  if curl -sf "$AGENT_VAULT_URL/health" | grep -q '"ok":true'; then
     break
   fi
   sleep 0.2
 done
-curl -sf "$AGENT_VAULT_URL/health" | grep -q '"sealed":false'
+curl -sf "$AGENT_VAULT_URL/health" | grep -q '"ok":true'
 
 "$BIN_DIR/vault" get "$SECRET_NAME" >"$GET_FILE"
 python3 - "$SECRET_VALUE" "$GET_FILE" <<'PY'
@@ -105,12 +105,12 @@ AGENT_VAULT_DATA_DIR="$DATA_DIR" PORT="$PORT" "$BIN_DIR/vault-server" &
 PID=$!
 
 for _ in $(seq 1 30); do
-  if curl -sf "$AGENT_VAULT_URL/health" | grep -q '"sealed":false'; then
+  if curl -sf "$AGENT_VAULT_URL/health" | grep -q '"ok":true'; then
     break
   fi
   sleep 0.2
 done
-curl -sf "$AGENT_VAULT_URL/health" | grep -q '"sealed":false'
+curl -sf "$AGENT_VAULT_URL/health" | grep -q '"ok":true'
 
 "$BIN_DIR/vault" export --passphrase "$BACKUP_PASS" --out "$EXPORT" >/dev/null
 test -s "$EXPORT"

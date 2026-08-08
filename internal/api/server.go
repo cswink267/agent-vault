@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cswink267/agent-vault/internal/crypto"
+	"github.com/cswink267/agent-vault/internal/security"
 	"github.com/cswink267/agent-vault/internal/store"
 	"github.com/cswink267/agent-vault/internal/ui"
 	"github.com/cswink267/agent-vault/internal/vault"
@@ -19,12 +22,24 @@ type contextKey string
 
 const actorLabelKey contextKey = "actorLabel"
 
+const maxJSONBody = 1 << 20 // 1 MiB
+
 type Server struct {
-	vault *vault.Vault
+	vault      *vault.Vault
+	authLimit  *security.AttemptLimiter
+	trustProxy bool
+	ui         *ui.Server
 }
 
 func New(v *vault.Vault) *Server {
-	return &Server{vault: v}
+	trustProxy := os.Getenv("AGENT_VAULT_TRUST_PROXY") == "1"
+	lim := security.NewAttemptLimiter(5, 15*time.Minute)
+	return &Server{
+		vault:      v,
+		authLimit:  lim,
+		trustProxy: trustProxy,
+		ui:         ui.New(v, lim, trustProxy),
+	}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -44,20 +59,25 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/tokens", s.withAuth(s.handleCreateToken))
 	mux.HandleFunc("GET /v1/backup/snapshot", s.withAuth(s.handleBackupSnapshot))
 	mux.HandleFunc("POST /v1/backup/export", s.withAuth(s.handleBackupExport))
-	uiHandler := ui.New(s.vault).Handler()
+	uiHandler := s.ui.Handler()
 	mux.Handle("/ui/", uiHandler)
 	mux.Handle("/ui", uiHandler)
-	return mux
+	return security.SecurityHeaders(mux)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"ok":     true,
-		"sealed": s.vault.Sealed(),
+		"ok": true,
 	})
 }
 
 func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
+	key := security.ClientKey(r, s.trustProxy)
+	if !s.authLimit.Allowed(key) {
+		writeError(w, http.StatusTooManyRequests, "too many unlock attempts; try again later")
+		return
+	}
+
 	var body struct {
 		Passphrase   string `json:"passphrase"`
 		UnsealKeyHex string `json:"unseal_key_hex"`
@@ -86,6 +106,7 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
+		s.authLimit.Fail(key)
 		if errors.Is(err, vault.ErrInvalidMasterKey) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -93,6 +114,7 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "unlock failed")
 		return
 	}
+	s.authLimit.Success(key)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -213,6 +235,9 @@ func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
 		writeVaultError(w, err)
 		return
 	}
+	if reveal {
+		security.SetNoStore(w)
+	}
 	writeJSON(w, http.StatusOK, secretToJSON(sec, reveal))
 }
 
@@ -322,6 +347,7 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleBackupSnapshot(w http.ResponseWriter, r *http.Request) {
 	actor := actorFromContext(r.Context())
+	security.SetNoStore(w)
 	w.Header().Set("Content-Type", "application/gzip")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"agent-vault-snapshot.avs.tar.gz\"")
 	if err := s.vault.WriteSnapshot(actor, w); err != nil {
@@ -349,6 +375,7 @@ func (s *Server) handleBackupExport(w http.ResponseWriter, r *http.Request) {
 		writeVaultError(w, err)
 		return
 	}
+	security.SetNoStore(w)
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"agent-vault-export.ave\"")
 	w.WriteHeader(http.StatusOK)
@@ -393,7 +420,8 @@ func actorFromContext(ctx context.Context) string {
 
 func decodeJSON(r *http.Request, v interface{}) error {
 	defer r.Body.Close()
-	dec := json.NewDecoder(r.Body)
+	limited := http.MaxBytesReader(nil, r.Body, maxJSONBody)
+	dec := json.NewDecoder(limited)
 	dec.DisallowUnknownFields()
 	return dec.Decode(v)
 }
@@ -485,5 +513,6 @@ func isValidationError(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "required") ||
 		strings.Contains(msg, "invalid type") ||
-		strings.Contains(msg, "invalid")
+		strings.Contains(msg, "invalid") ||
+		strings.Contains(msg, "must be at least")
 }

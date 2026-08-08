@@ -8,18 +8,20 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/cswink267/agent-vault/internal/security"
 	"github.com/cswink267/agent-vault/internal/ui"
 	"github.com/cswink267/agent-vault/internal/vault"
 )
 
 func TestUILoginCRUDRevealAndCSRF(t *testing.T) {
 	dir := t.TempDir()
-	v, _, err := vault.Init(dir, "pass")
+	v, _, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
-	uiSrv := ui.New(v)
+	uiSrv := ui.New(v, nil, false)
 	ts := httptest.NewServer(uiSrv.Handler())
 	defer ts.Close()
 
@@ -30,7 +32,7 @@ func TestUILoginCRUDRevealAndCSRF(t *testing.T) {
 	client := &http.Client{Jar: jar}
 
 	// login
-	resp, err := client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"pass"}`))
+	resp, err := client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"test-passphrase"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +147,7 @@ func TestUILoginCRUDRevealAndCSRF(t *testing.T) {
 	}
 
 	// unlock via /ui/api/unlock with passphrase + CSRF
-	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/ui/api/unlock", strings.NewReader(`{"passphrase":"pass"}`))
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/ui/api/unlock", strings.NewReader(`{"passphrase":"test-passphrase"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(ui.CSRFHeader, csrf)
 	resp, err = client.Do(req)
@@ -171,11 +173,11 @@ func TestUILoginCRUDRevealAndCSRF(t *testing.T) {
 
 func TestUIChangePassphrase(t *testing.T) {
 	dir := t.TempDir()
-	v, _, err := vault.Init(dir, "old-pass")
+	v, _, err := vault.Init(dir, "old-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
-	uiSrv := ui.New(v)
+	uiSrv := ui.New(v, nil, false)
 	ts := httptest.NewServer(uiSrv.Handler())
 	defer ts.Close()
 
@@ -185,7 +187,7 @@ func TestUIChangePassphrase(t *testing.T) {
 	}
 	client := &http.Client{Jar: jar}
 
-	resp, err := client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"old-pass"}`))
+	resp, err := client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"old-passphrase"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +201,7 @@ func TestUIChangePassphrase(t *testing.T) {
 		t.Fatal("missing CSRF cookie after login")
 	}
 
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/ui/api/change-passphrase", strings.NewReader(`{"old_passphrase":"wrong","new_passphrase":"new-pass"}`))
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/ui/api/change-passphrase", strings.NewReader(`{"old_passphrase":"wrong","new_passphrase":"new-passphrase"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(ui.CSRFHeader, csrf)
 	resp, err = client.Do(req)
@@ -212,7 +214,7 @@ func TestUIChangePassphrase(t *testing.T) {
 		t.Fatalf("wrong old status %d body %s", resp.StatusCode, b)
 	}
 
-	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/ui/api/change-passphrase", strings.NewReader(`{"old_passphrase":"old-pass","new_passphrase":"new-pass"}`))
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/ui/api/change-passphrase", strings.NewReader(`{"old_passphrase":"old-passphrase","new_passphrase":"new-passphrase"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(ui.CSRFHeader, csrf)
 	resp, err = client.Do(req)
@@ -233,24 +235,24 @@ func TestUIChangePassphrase(t *testing.T) {
 		t.Fatal("expected root token in UI change response")
 	}
 
-	if err := v.VerifyPassphrase("new-pass"); err != nil {
+	if err := v.VerifyPassphrase("new-passphrase"); err != nil {
 		t.Fatal(err)
 	}
-	if err := v.VerifyPassphrase("old-pass"); err == nil {
+	if err := v.VerifyPassphrase("old-passphrase"); err == nil {
 		t.Fatal("old passphrase should fail")
 	}
 }
 
 func TestUIRotateMaster(t *testing.T) {
 	dir := t.TempDir()
-	v, _, err := vault.Init(dir, "pass")
+	v, _, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := v.Put("root", vault.Secret{Name: "k", Type: "note", Secret: "v"}); err != nil {
 		t.Fatal(err)
 	}
-	uiSrv := ui.New(v)
+	uiSrv := ui.New(v, nil, false)
 	ts := httptest.NewServer(uiSrv.Handler())
 	defer ts.Close()
 
@@ -259,7 +261,7 @@ func TestUIRotateMaster(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &http.Client{Jar: jar}
-	resp, err := client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"pass"}`))
+	resp, err := client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"test-passphrase"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +271,7 @@ func TestUIRotateMaster(t *testing.T) {
 	}
 	csrf := csrfFromJar(t, jar, ts.URL)
 
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/ui/api/rotate-master", strings.NewReader(`{"passphrase":"pass"}`))
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/ui/api/rotate-master", strings.NewReader(`{"passphrase":"test-passphrase"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(ui.CSRFHeader, csrf)
 	resp, err = client.Do(req)
@@ -289,11 +291,11 @@ func TestUIRotateMaster(t *testing.T) {
 
 func TestUILoginWrongPassphrase(t *testing.T) {
 	dir := t.TempDir()
-	v, _, err := vault.Init(dir, "pass")
+	v, _, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
-	uiSrv := ui.New(v)
+	uiSrv := ui.New(v, nil, false)
 	ts := httptest.NewServer(uiSrv.Handler())
 	defer ts.Close()
 
@@ -308,13 +310,45 @@ func TestUILoginWrongPassphrase(t *testing.T) {
 	}
 }
 
-func TestUIAPIRequiresSession(t *testing.T) {
+func TestUILoginRateLimit(t *testing.T) {
 	dir := t.TempDir()
-	v, _, err := vault.Init(dir, "pass")
+	v, _, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
-	uiSrv := ui.New(v)
+	lim := security.NewAttemptLimiter(3, time.Hour)
+	uiSrv := ui.New(v, lim, false)
+	ts := httptest.NewServer(uiSrv.Handler())
+	defer ts.Close()
+
+	for i := 0; i < 3; i++ {
+		resp, err := http.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"wrong-passphrase"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: status %d", i+1, resp.StatusCode)
+		}
+	}
+	resp, err := http.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"wrong-passphrase"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("want 429, got %d body %s", resp.StatusCode, b)
+	}
+}
+
+func TestUIAPIRequiresSession(t *testing.T) {
+	dir := t.TempDir()
+	v, _, err := vault.Init(dir, "test-passphrase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uiSrv := ui.New(v, nil, false)
 	ts := httptest.NewServer(uiSrv.Handler())
 	defer ts.Close()
 
@@ -330,11 +364,11 @@ func TestUIAPIRequiresSession(t *testing.T) {
 
 func TestUIPagesAuth(t *testing.T) {
 	dir := t.TempDir()
-	v, _, err := vault.Init(dir, "pass")
+	v, _, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
-	uiSrv := ui.New(v)
+	uiSrv := ui.New(v, nil, false)
 	ts := httptest.NewServer(uiSrv.Handler())
 	defer ts.Close()
 
@@ -369,7 +403,7 @@ func TestUIPagesAuth(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &http.Client{Jar: jar}
-	resp, err = client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"pass"}`))
+	resp, err = client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"test-passphrase"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,11 +435,11 @@ func TestUIPagesAuth(t *testing.T) {
 
 func TestUIUpdateWithRevealedPayload(t *testing.T) {
 	dir := t.TempDir()
-	v, _, err := vault.Init(dir, "pass")
+	v, _, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
-	uiSrv := ui.New(v)
+	uiSrv := ui.New(v, nil, false)
 	ts := httptest.NewServer(uiSrv.Handler())
 	defer ts.Close()
 
@@ -415,7 +449,7 @@ func TestUIUpdateWithRevealedPayload(t *testing.T) {
 	}
 	client := &http.Client{Jar: jar}
 
-	resp, err := client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"pass"}`))
+	resp, err := client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"test-passphrase"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -520,11 +554,11 @@ func TestUIUpdateWithRevealedPayload(t *testing.T) {
 
 func TestUIBackupSnapshot(t *testing.T) {
 	dir := t.TempDir()
-	v, _, err := vault.Init(dir, "pass")
+	v, _, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
-	uiSrv := ui.New(v)
+	uiSrv := ui.New(v, nil, false)
 	ts := httptest.NewServer(uiSrv.Handler())
 	defer ts.Close()
 
@@ -542,7 +576,7 @@ func TestUIBackupSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &http.Client{Jar: jar}
-	resp, err = client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"pass"}`))
+	resp, err = client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"test-passphrase"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -601,18 +635,18 @@ func TestUIBackupSnapshot(t *testing.T) {
 
 func TestUIBackupExport(t *testing.T) {
 	dir := t.TempDir()
-	v, _, err := vault.Init(dir, "pass")
+	v, _, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := v.Put("root", vault.Secret{Name: "exp", Type: "api_key", Secret: "val"}); err != nil {
 		t.Fatal(err)
 	}
-	uiSrv := ui.New(v)
+	uiSrv := ui.New(v, nil, false)
 	ts := httptest.NewServer(uiSrv.Handler())
 	defer ts.Close()
 
-	resp, err := http.Post(ts.URL+"/ui/api/backup/export", "application/json", strings.NewReader(`{"backup_passphrase":"bp"}`))
+	resp, err := http.Post(ts.URL+"/ui/api/backup/export", "application/json", strings.NewReader(`{"backup_passphrase":"backup-passphrase"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -626,14 +660,14 @@ func TestUIBackupExport(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &http.Client{Jar: jar}
-	resp, err = client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"pass"}`))
+	resp, err = client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"test-passphrase"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
 	csrf := csrfFromJar(t, jar, ts.URL)
 
-	resp, err = client.Post(ts.URL+"/ui/api/backup/export", "application/json", strings.NewReader(`{"backup_passphrase":"bp"}`))
+	resp, err = client.Post(ts.URL+"/ui/api/backup/export", "application/json", strings.NewReader(`{"backup_passphrase":"backup-passphrase"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -643,7 +677,7 @@ func TestUIBackupExport(t *testing.T) {
 		t.Fatalf("export without csrf status %d body %s", resp.StatusCode, b)
 	}
 
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/ui/api/backup/export", strings.NewReader(`{"backup_passphrase":"bp"}`))
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/ui/api/backup/export", strings.NewReader(`{"backup_passphrase":"backup-passphrase"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(ui.CSRFHeader, csrf)
 	resp, err = client.Do(req)
@@ -672,7 +706,7 @@ func TestUIBackupExport(t *testing.T) {
 	}
 
 	v.Lock()
-	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/ui/api/backup/export", strings.NewReader(`{"backup_passphrase":"bp"}`))
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/ui/api/backup/export", strings.NewReader(`{"backup_passphrase":"backup-passphrase"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(ui.CSRFHeader, csrf)
 	resp, err = client.Do(req)
@@ -695,14 +729,14 @@ func min(a, b int) int {
 
 func TestUISettingsAPI(t *testing.T) {
 	dir := t.TempDir()
-	v, _, err := vault.Init(dir, "pass")
+	v, _, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
 	caddyDir := t.TempDir()
 	v.SetCaddyConfigDir(caddyDir)
 
-	uiSrv := ui.New(v)
+	uiSrv := ui.New(v, nil, false)
 	ts := httptest.NewServer(uiSrv.Handler())
 	defer ts.Close()
 
@@ -721,7 +755,7 @@ func TestUISettingsAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &http.Client{Jar: jar}
-	resp, err = client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"pass"}`))
+	resp, err = client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"test-passphrase"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -811,11 +845,11 @@ func TestUISettingsAPI(t *testing.T) {
 
 func TestUISettingsPage(t *testing.T) {
 	dir := t.TempDir()
-	v, _, err := vault.Init(dir, "pass")
+	v, _, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
-	uiSrv := ui.New(v)
+	uiSrv := ui.New(v, nil, false)
 	ts := httptest.NewServer(uiSrv.Handler())
 	defer ts.Close()
 
@@ -841,7 +875,7 @@ func TestUISettingsPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &http.Client{Jar: jar}
-	resp, err = client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"pass"}`))
+	resp, err = client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"test-passphrase"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

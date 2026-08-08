@@ -141,10 +141,10 @@ Set `AGENT_VAULT_URL` and `AGENT_VAULT_TOKEN` in the MCP server env. Ensure `vau
 
 ## Security notes
 
-- **Unseal key** — `/data/unseal.key` is written with mode `0600` at init and rewritten by `rotate-master`. Restrict volume access on the host; anyone with read access to this file can unseal the vault.
-- **Root token** — Treat like a password. Save from init logs or `/data/root.token`; mint scoped tokens via `POST /v1/tokens` for agents.
-- **Passphrase** — Required for init, Admin UI login, and manual unlock (`POST /v1/unlock`). Rotate with `vault change-passphrase` or the Admin UI form (does not invalidate `unseal.key`; **does revoke all bearer tokens** and mints a new root token). Do not commit it to git or bake it into images.
-- **Network** — Private HTTP on host port 8200 is for the LAN. Public access should use the optional `https` Compose profile (Caddy + Let’s Encrypt) with Cloudflare **DNS only** (grey cloud). Do not use orange-cloud proxying for this setup.
+- **Unseal key** — `/data/unseal.key` is written with mode `0600` at init and rewritten by `rotate-master`. Restrict volume access on the host; anyone with read access to this file can unseal the vault. Snapshot downloads include this key — treat snapshot files as full vault compromise material.
+- **Root token** — Treat like a password. On server init it is written only to `/data/root.token` (mode `0600`), not to container logs. Mint agent tokens via `POST /v1/tokens`.
+- **Passphrase** — Minimum **12 characters** for init, change-passphrase, and backup export. Required for Admin UI login and manual unlock. Login/unlock are rate-limited (5 failures / 15 minutes per client IP). Rotate with `vault change-passphrase` or Settings (does not invalidate `unseal.key`; **does revoke all bearer tokens** and mints a new root token). Unset `AGENT_VAULT_PASSPHRASE` after init.
+- **Network** — Private HTTP on host port 8200 is for the LAN. Prefer binding only where needed (`AGENT_VAULT_BIND`). Public access should use the optional `https` Compose profile (Caddy + Let’s Encrypt) with Cloudflare **DNS only** (grey cloud). Set `AGENT_VAULT_TRUST_PROXY=1` when rate limits should use `X-Forwarded-For` behind Caddy.
 
 ## HTTP API
 
@@ -152,7 +152,7 @@ Search endpoint: `GET /v1/search` (query params `q`, `tag`, `type`). This path r
 
 | Route | Auth | Purpose |
 |-------|------|---------|
-| `GET /health` | no | Liveness + sealed status |
+| `GET /health` | no | Liveness (`{"ok":true}` only) |
 | `GET /ui/*` | session cookie | Admin UI (humans; passphrase login) |
 | `POST /v1/unlock` | yes | Unlock with passphrase or unseal key |
 | `POST /v1/lock` | yes | Seal vault |
@@ -171,10 +171,12 @@ Search endpoint: `GET /v1/search` (query params `q`, `tag`, `type`). This path r
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `PORT` | `8080` | HTTP listen port |
+| `AGENT_VAULT_BIND` | `0.0.0.0` | Listen address (use `127.0.0.1` for host-local only) |
 | `AGENT_VAULT_DATA_DIR` | `/data` | SQLite DB and key material directory |
 | `AGENT_VAULT_UNSEAL_KEY` | `$DATA_DIR/unseal.key` | Auto-unseal key file path |
-| `AGENT_VAULT_PASSPHRASE` | — | Passphrase for first-time init |
+| `AGENT_VAULT_PASSPHRASE` | — | Passphrase for first-time init (≥12 chars; unset after init) |
 | `AGENT_VAULT_INIT` | — | Set to `1` to allow init when DB is missing |
+| `AGENT_VAULT_TRUST_PROXY` | — | Set to `1` to trust `X-Forwarded-For` for auth rate limits |
 | `AGENT_VAULT_URL` | `http://localhost:8200` | CLI/MCP API base URL (Compose host port; use `https://<hostname>` when HTTPS is configured) |
 | `AGENT_VAULT_TOKEN` | — | Bearer token for CLI/MCP |
 | `AGENT_VAULT_CADDY_CONFIG_DIR` | `/caddy-config` (container) | Directory where Settings writes the generated `Caddyfile` |

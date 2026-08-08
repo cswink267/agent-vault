@@ -13,7 +13,7 @@ import (
 func setupTestServer(t *testing.T) (*client.Client, func()) {
 	t.Helper()
 	dir := t.TempDir()
-	v, res, err := vault.Init(dir, "pass")
+	v, res, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestDownloadSnapshotAndExport(t *testing.T) {
 	}
 
 	var export bytes.Buffer
-	if err := c.DownloadExport("backup-pass", &export); err != nil {
+	if err := c.DownloadExport("backup-passphrase", &export); err != nil {
 		t.Fatalf("DownloadExport: %v", err)
 	}
 	expData := export.Bytes()
@@ -122,7 +122,7 @@ func TestHealthUnlockLockListDeleteAuditCreateToken(t *testing.T) {
 		t.Fatalf("Health after lock: %v", err)
 	}
 
-	if err := c.Unlock("pass"); err != nil {
+	if err := c.Unlock("test-passphrase"); err != nil {
 		t.Fatalf("Unlock: %v", err)
 	}
 

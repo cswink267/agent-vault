@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cswink267/agent-vault/internal/security"
 	"github.com/cswink267/agent-vault/internal/store"
 	"github.com/cswink267/agent-vault/internal/vault"
 )
@@ -17,15 +18,24 @@ type contextKey string
 
 const actorLabelKey contextKey = "actorLabel"
 
+const maxJSONBody = 1 << 20 // 1 MiB
+
 type Server struct {
-	Vault    *vault.Vault
-	Sessions *Sessions
+	Vault      *vault.Vault
+	Sessions   *Sessions
+	authLimit  *security.AttemptLimiter
+	trustProxy bool
 }
 
-func New(v *vault.Vault) *Server {
+func New(v *vault.Vault, authLimit *security.AttemptLimiter, trustProxy bool) *Server {
+	if authLimit == nil {
+		authLimit = security.NewAttemptLimiter(5, 0)
+	}
 	return &Server{
-		Vault:    v,
-		Sessions: NewSessions(0, 0),
+		Vault:      v,
+		Sessions:   NewSessions(0, 0),
+		authLimit:  authLimit,
+		trustProxy: trustProxy,
 	}
 }
 
@@ -62,10 +72,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /ui/s/{name}", s.withPageAuth(s.handleDetailPage))
 	mux.HandleFunc("GET /ui/audit", s.withPageAuth(s.handleAuditPage))
 	mux.HandleFunc("GET /ui/settings", s.withPageAuth(s.handleSettingsPage))
-	return mux
+	return security.SecurityHeaders(mux)
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	key := security.ClientKey(r, s.trustProxy)
+	if !s.authLimit.Allowed(key) {
+		writeError(w, http.StatusTooManyRequests, "too many login attempts; try again later")
+		return
+	}
+
 	var body struct {
 		Passphrase string `json:"passphrase"`
 	}
@@ -87,6 +103,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.Vault.LoginWithPassphrase(body.Passphrase, actor); err != nil {
 		s.Sessions.Delete(id)
+		s.authLimit.Fail(key)
 		if errors.Is(err, vault.ErrInvalidMasterKey) {
 			writeError(w, http.StatusUnauthorized, "invalid passphrase")
 			return
@@ -95,6 +112,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.authLimit.Success(key)
 	SetSessionCookies(w, r, id, csrf)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok":     true,
@@ -152,6 +170,9 @@ func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeVaultError(w, err)
 		return
+	}
+	if reveal {
+		security.SetNoStore(w)
 	}
 	writeJSON(w, http.StatusOK, secretToJSON(sec, reveal))
 }
@@ -216,6 +237,12 @@ func (s *Server) handleLock(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
+	key := security.ClientKey(r, s.trustProxy)
+	if !s.authLimit.Allowed(key) {
+		writeError(w, http.StatusTooManyRequests, "too many unlock attempts; try again later")
+		return
+	}
+
 	var body struct {
 		Passphrase string `json:"passphrase"`
 	}
@@ -230,6 +257,7 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 
 	actor := actorFromContext(r.Context())
 	if err := s.Vault.UnlockWithPassphrase(body.Passphrase, actor); err != nil {
+		s.authLimit.Fail(key)
 		if errors.Is(err, vault.ErrInvalidMasterKey) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -237,6 +265,7 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "unlock failed")
 		return
 	}
+	s.authLimit.Success(key)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -319,6 +348,7 @@ func (s *Server) handleRotateMaster(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleBackupSnapshot(w http.ResponseWriter, r *http.Request) {
 	actor := actorFromContext(r.Context())
+	security.SetNoStore(w)
 	w.Header().Set("Content-Type", "application/gzip")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"agent-vault-snapshot.avs.tar.gz\"")
 	if err := s.Vault.WriteSnapshot(actor, w); err != nil {
@@ -346,6 +376,7 @@ func (s *Server) handleBackupExport(w http.ResponseWriter, r *http.Request) {
 		writeVaultError(w, err)
 		return
 	}
+	security.SetNoStore(w)
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"agent-vault-export.ave\"")
 	w.WriteHeader(http.StatusOK)
@@ -447,7 +478,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view, err := s.Vault.UpdateSettings(body.PublicHostname, body.HTTPSEnabled)
+	view, err := s.Vault.UpdateSettings(body.PublicHostname, body.HTTPSEnabled, actorFromContext(r.Context()))
 	if err != nil {
 		writeVaultError(w, err)
 		return
@@ -522,7 +553,8 @@ func actorFromContext(ctx context.Context) string {
 
 func decodeJSON(r *http.Request, v interface{}) error {
 	defer r.Body.Close()
-	dec := json.NewDecoder(r.Body)
+	limited := http.MaxBytesReader(nil, r.Body, maxJSONBody)
+	dec := json.NewDecoder(limited)
 	dec.DisallowUnknownFields()
 	return dec.Decode(v)
 }
@@ -614,5 +646,6 @@ func isValidationError(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "required") ||
 		strings.Contains(msg, "invalid type") ||
-		strings.Contains(msg, "invalid")
+		strings.Contains(msg, "invalid") ||
+		strings.Contains(msg, "must be at least")
 }

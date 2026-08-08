@@ -30,12 +30,12 @@ AGENT_VAULT_DATA_DIR="$DATA_DIR" PORT="$PORT" "$BIN_DIR/vault-server" &
 PID=$!
 
 for _ in $(seq 1 30); do
-  if curl -sf "$BASE/health" | grep -q '"sealed":false'; then
+  if curl -sf "$BASE/health" | grep -q '"ok":true'; then
     break
   fi
   sleep 0.2
 done
-curl -sf "$BASE/health" | grep -q '"sealed":false'
+curl -sf "$BASE/health" | grep -q '"ok":true'
 
 csrf_from_jar() {
   awk -F'\t' '$6=="agent_vault_csrf" {print $7}' "$JAR" | tail -1

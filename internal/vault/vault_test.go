@@ -11,6 +11,7 @@ import (
 
 	"github.com/cswink267/agent-vault/internal/backup"
 	"github.com/cswink267/agent-vault/internal/crypto"
+	"github.com/cswink267/agent-vault/internal/settings"
 	"github.com/cswink267/agent-vault/internal/vault"
 )
 
@@ -359,6 +360,145 @@ func TestBuildExportWhileSealed(t *testing.T) {
 	v.Lock()
 	if _, err := v.BuildExport("test", "backup-pass"); !errors.Is(err, vault.ErrSealed) {
 		t.Fatalf("want ErrSealed, got %v", err)
+	}
+}
+
+func TestUpdateSettingsWritesCaddyfile(t *testing.T) {
+	dir := t.TempDir()
+	caddyDir := filepath.Join(dir, "caddy-config")
+	v, _, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.SetCaddyConfigDir(caddyDir)
+
+	view, err := v.UpdateSettings("vault.example.com", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := settings.RenderCaddyfile("vault.example.com", true)
+	got, err := os.ReadFile(filepath.Join(caddyDir, "Caddyfile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Fatalf("Caddyfile:\n got %q\nwant %q", got, want)
+	}
+	if view.PublicHostname != "vault.example.com" || !view.HTTPSEnabled {
+		t.Fatalf("stored settings: %+v", view)
+	}
+	if view.PublicBaseURL != "https://vault.example.com" {
+		t.Fatalf("PublicBaseURL = %q", view.PublicBaseURL)
+	}
+	if view.CaddyfileStatus != "active" {
+		t.Fatalf("CaddyfileStatus = %q want active", view.CaddyfileStatus)
+	}
+	if view.ApplyHint != "docker compose --profile https up -d" {
+		t.Fatalf("ApplyHint = %q", view.ApplyHint)
+	}
+	if view.CaddyConfigPath != filepath.Join(caddyDir, "Caddyfile") {
+		t.Fatalf("CaddyConfigPath = %q", view.CaddyConfigPath)
+	}
+
+	audit, err := v.ListAudit(5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saw bool
+	for _, row := range audit {
+		if row.Action == "settings_update" && row.SecretName == "" {
+			saw = true
+		}
+	}
+	if !saw {
+		t.Fatal("expected settings_update audit")
+	}
+}
+
+func TestUpdateSettingsInvalidHostname(t *testing.T) {
+	dir := t.TempDir()
+	v, _, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.SetCaddyConfigDir(filepath.Join(dir, "caddy"))
+
+	_, err = v.UpdateSettings("https://bad.example.com", true)
+	if !errors.Is(err, settings.ErrInvalidHostname) {
+		t.Fatalf("got %v want %v", err, settings.ErrInvalidHostname)
+	}
+}
+
+func TestUpdateSettingsDisabledWritesStub(t *testing.T) {
+	dir := t.TempDir()
+	caddyDir := filepath.Join(dir, "caddy-config")
+	v, _, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.SetCaddyConfigDir(caddyDir)
+
+	view, err := v.UpdateSettings("vault.example.com", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := settings.RenderCaddyfile("vault.example.com", false)
+	got, err := os.ReadFile(filepath.Join(caddyDir, "Caddyfile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Fatalf("Caddyfile:\n got %q\nwant %q", got, want)
+	}
+	if view.CaddyfileStatus != "disabled" {
+		t.Fatalf("CaddyfileStatus = %q want disabled", view.CaddyfileStatus)
+	}
+	if view.ApplyHint == "docker compose --profile https up -d" {
+		t.Fatal("disabled should not show compose up hint")
+	}
+}
+
+func TestUpdateSettingsSkipsFileWhenNoCaddyDir(t *testing.T) {
+	dir := t.TempDir()
+	v, _, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := v.UpdateSettings("vault.example.com", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.PublicHostname != "vault.example.com" {
+		t.Fatalf("settings not persisted: %+v", view)
+	}
+	if view.CaddyConfigPath != "" {
+		t.Fatalf("CaddyConfigPath should be empty without dir: %q", view.CaddyConfigPath)
+	}
+}
+
+func TestGetSettingsDefaults(t *testing.T) {
+	dir := t.TempDir()
+	v, _, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := v.GetSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.PublicHostname != "" || view.HTTPSEnabled {
+		t.Fatalf("defaults: %+v", view)
+	}
+	if view.PrivateBaseURL != "http://localhost:8200" {
+		t.Fatalf("PrivateBaseURL = %q", view.PrivateBaseURL)
+	}
+	if view.PublicBaseURL != "" {
+		t.Fatalf("PublicBaseURL = %q", view.PublicBaseURL)
+	}
+	if view.CaddyfileStatus != "disabled" {
+		t.Fatalf("CaddyfileStatus = %q", view.CaddyfileStatus)
 	}
 }
 

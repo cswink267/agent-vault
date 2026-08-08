@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cswink267/agent-vault/internal/backup"
 	"github.com/cswink267/agent-vault/internal/vault"
 )
 
@@ -180,6 +181,51 @@ func (c *Client) CreateToken(label string) (token string, outLabel string, err e
 	return resp.Token, resp.Label, nil
 }
 
+func (c *Client) DownloadSnapshot(w io.Writer) error {
+	return c.doDownload(http.MethodGet, "/v1/backup/snapshot", true, nil, w)
+}
+
+func (c *Client) DownloadExport(backupPassphrase string, w io.Writer) error {
+	body := map[string]string{"backup_passphrase": backupPassphrase}
+	return c.doDownload(http.MethodPost, "/v1/backup/export", true, body, w)
+}
+
+func (c *Client) ImportSecrets(records []backup.ExportRecord, overwrite bool) (created, skipped, overwritten int, err error) {
+	for _, rec := range records {
+		sec := vault.Secret{
+			Name:     rec.Name,
+			Type:     rec.Type,
+			Username: rec.Username,
+			Secret:   rec.Secret,
+			URL:      rec.URL,
+			Notes:    rec.Notes,
+			Tags:     rec.Tags,
+			Metadata: rec.Metadata,
+		}
+		_, getErr := c.Get(sec.Name, false)
+		if getErr == nil {
+			if !overwrite {
+				skipped++
+				continue
+			}
+			if _, err := c.Put(sec); err != nil {
+				return created, skipped, overwritten, err
+			}
+			overwritten++
+			continue
+		}
+		if apiErr, ok := getErr.(*APIError); ok && apiErr.Status == http.StatusNotFound {
+			if _, err := c.Put(sec); err != nil {
+				return created, skipped, overwritten, err
+			}
+			created++
+			continue
+		}
+		return created, skipped, overwritten, getErr
+	}
+	return created, skipped, overwritten, nil
+}
+
 type secretJSON struct {
 	ID        string            `json:"id"`
 	Name      string            `json:"name"`
@@ -298,6 +344,46 @@ func (c *Client) doJSON(method, path string, auth bool, body interface{}, out in
 		return nil
 	}
 	return json.Unmarshal(data, out)
+}
+
+func (c *Client) doDownload(method, path string, auth bool, body interface{}, w io.Writer) error {
+	var r io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		r = bytes.NewReader(b)
+	}
+	req, err := http.NewRequest(method, c.BaseURL+path, r)
+	if err != nil {
+		return err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if auth && c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+	resp, err := c.http().Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		data, _ := io.ReadAll(resp.Body)
+		var errBody struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(data, &errBody)
+		msg := errBody.Error
+		if msg == "" {
+			msg = string(data)
+		}
+		return &APIError{Status: resp.StatusCode, Message: msg}
+	}
+	_, err = io.Copy(w, resp.Body)
+	return err
 }
 
 func (c *Client) doNoContent(method, path string, auth bool) error {

@@ -42,6 +42,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/search", s.withAuth(s.handleSearch))
 	mux.HandleFunc("GET /v1/audit", s.withAuth(s.handleAudit))
 	mux.HandleFunc("POST /v1/tokens", s.withAuth(s.handleCreateToken))
+	mux.HandleFunc("GET /v1/backup/snapshot", s.withAuth(s.handleBackupSnapshot))
+	mux.HandleFunc("POST /v1/backup/export", s.withAuth(s.handleBackupExport))
 	uiHandler := ui.New(s.vault).Handler()
 	mux.Handle("/ui/", uiHandler)
 	mux.Handle("/ui", uiHandler)
@@ -316,6 +318,41 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 		"token": token,
 		"label": body.Label,
 	})
+}
+
+func (s *Server) handleBackupSnapshot(w http.ResponseWriter, r *http.Request) {
+	actor := actorFromContext(r.Context())
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"agent-vault-snapshot.avs.tar.gz\"")
+	if err := s.vault.WriteSnapshot(actor, w); err != nil {
+		writeVaultError(w, err)
+		return
+	}
+}
+
+func (s *Server) handleBackupExport(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		BackupPassphrase string `json:"backup_passphrase"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if body.BackupPassphrase == "" {
+		writeError(w, http.StatusBadRequest, "backup_passphrase is required")
+		return
+	}
+
+	actor := actorFromContext(r.Context())
+	blob, err := s.vault.BuildExport(actor, body.BackupPassphrase)
+	if err != nil {
+		writeVaultError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"agent-vault-export.ave\"")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(blob)
 }
 
 func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {

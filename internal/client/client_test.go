@@ -1,6 +1,7 @@
 package client_test
 
 import (
+	"bytes"
 	"net/http/httptest"
 	"testing"
 
@@ -57,6 +58,34 @@ func TestPutGetSearch(t *testing.T) {
 	}
 	if results[0].Name != sec.Name {
 		t.Fatalf("Search name: %q", results[0].Name)
+	}
+}
+
+func TestDownloadSnapshotAndExport(t *testing.T) {
+	c, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	sec := vault.Secret{Name: "exp", Type: "api_key", Secret: "val"}
+	if _, err := c.Put(sec); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	var snap bytes.Buffer
+	if err := c.DownloadSnapshot(&snap); err != nil {
+		t.Fatalf("DownloadSnapshot: %v", err)
+	}
+	data := snap.Bytes()
+	if len(data) < 2 || data[0] != 0x1f || data[1] != 0x8b {
+		t.Fatalf("snapshot missing gzip magic")
+	}
+
+	var export bytes.Buffer
+	if err := c.DownloadExport("backup-pass", &export); err != nil {
+		t.Fatalf("DownloadExport: %v", err)
+	}
+	expData := export.Bytes()
+	if len(expData) < 4 || string(expData[:4]) != "AVE1" {
+		t.Fatalf("export missing AVE1 magic")
 	}
 }
 

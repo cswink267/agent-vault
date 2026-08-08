@@ -496,6 +496,134 @@ func assertAuditActions(t *testing.T, rows []map[string]interface{}, actions ...
 	}
 }
 
+func TestBackupSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	v, res, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := api.New(v)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	token := res.Token
+
+	resp, err := http.Get(ts.URL + "/v1/backup/snapshot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("no auth status %d want 401", resp.StatusCode)
+	}
+
+	resp, err = doAuth(http.MethodGet, ts.URL+"/v1/backup/snapshot", token, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("snapshot status %d body %s", resp.StatusCode, b)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if ct != "application/gzip" && ct != "application/x-gtar" {
+		t.Fatalf("Content-Type %q want application/gzip or application/x-gtar", ct)
+	}
+	cd := resp.Header.Get("Content-Disposition")
+	if !strings.Contains(cd, "attachment") || !strings.Contains(cd, "agent-vault-snapshot.avs.tar.gz") {
+		t.Fatalf("Content-Disposition %q", cd)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) < 2 || data[0] != 0x1f || data[1] != 0x8b {
+		t.Fatalf("missing gzip magic: %x", data[:min(2, len(data))])
+	}
+}
+
+func TestBackupExport(t *testing.T) {
+	dir := t.TempDir()
+	v, res, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	postSecretLocal(v, `{"name":"exp","type":"api_key","secret":"val"}`)
+	srv := api.New(v)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	token := res.Token
+
+	resp, err := doAuth(http.MethodPost, ts.URL+"/v1/backup/export", token, `{"backup_passphrase":"bp"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("export status %d body %s", resp.StatusCode, b)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if ct != "application/octet-stream" {
+		t.Fatalf("Content-Type %q want application/octet-stream", ct)
+	}
+	cd := resp.Header.Get("Content-Disposition")
+	if !strings.Contains(cd, "attachment") || !strings.Contains(cd, "agent-vault-export.ave") {
+		t.Fatalf("Content-Disposition %q", cd)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) < 4 || string(data[:4]) != "AVE1" {
+		t.Fatalf("missing AVE1 magic: %q", data[:min(4, len(data))])
+	}
+
+	v.Lock()
+	resp, err = doAuth(http.MethodPost, ts.URL+"/v1/backup/export", token, `{"backup_passphrase":"bp"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("sealed export status %d body %s", resp.StatusCode, b)
+	}
+
+	resp, err = http.Post(ts.URL+"/v1/backup/export", "application/json", strings.NewReader(`{"backup_passphrase":"bp"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("no auth export status %d want 401", resp.StatusCode)
+	}
+}
+
+func postSecretLocal(v *vault.Vault, body string) {
+	sec, err := decodeSecretTest(body)
+	if err != nil {
+		panic(err)
+	}
+	if _, err := v.Create("root", sec); err != nil {
+		panic(err)
+	}
+}
+
+func decodeSecretTest(body string) (vault.Secret, error) {
+	var b struct {
+		Name   string `json:"name"`
+		Type   string `json:"type"`
+		Secret string `json:"secret"`
+	}
+	if err := json.Unmarshal([]byte(body), &b); err != nil {
+		return vault.Secret{}, err
+	}
+	return vault.Secret{Name: b.Name, Type: b.Type, Secret: b.Secret}, nil
+}
+
 func postSecret(baseURL, token, body string) {
 	resp, err := doAuth(http.MethodPost, baseURL+"/v1/secrets", token, body)
 	if err != nil {

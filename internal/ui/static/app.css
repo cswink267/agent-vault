@@ -10,7 +10,7 @@
   --danger-hover: #7f2424;
   --radius: 4px;
   --space: 1rem;
-  --font: "IBM Plex Sans", "Source Sans 3", "Segoe UI", sans-serif;
+  --font: "IBM Plex Sans", "Source Sans 3", "Helvetica Neue", sans-serif;
   --font-mono: "IBM Plex Mono", "Source Code Pro", monospace;
 }
 
@@ -209,6 +209,12 @@ textarea:focus {
   border: 1px solid #e8b4b4;
 }
 
+.form-message.info {
+  background: #e8f2fa;
+  color: var(--accent);
+  border: 1px solid #b8d4e8;
+}
+
 .status-badge {
   font-size: 0.75rem;
   padding: 0.125rem 0.5rem;
@@ -307,6 +313,15 @@ input[type="password"]#passphrase,
 input[type="password"]#edit-secret,
 input[type="password"]#new-secret {
   font-family: var(--font-mono);
+}
+
+.login-vault-status {
+  font-size: 0.875rem;
+  margin: 0 0 0.25rem;
+}
+
+.login-vault-status.sealed {
+  color: #6b4f2a;
 }
 
 .page-login {

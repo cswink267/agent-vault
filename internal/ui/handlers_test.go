@@ -274,6 +274,125 @@ func TestUIPagesAuth(t *testing.T) {
 	}
 }
 
+func TestUIUpdateWithRevealedPayload(t *testing.T) {
+	dir := t.TempDir()
+	v, _, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uiSrv := ui.New(v)
+	ts := httptest.NewServer(uiSrv.Handler())
+	defer ts.Close()
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar}
+
+	resp, err := client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"pass"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	csrf := csrfFromJar(t, jar, ts.URL)
+	if csrf == "" {
+		t.Fatal("missing CSRF cookie after login")
+	}
+
+	createBody := `{"name":"edit-test","type":"api_key","secret":"original-secret","tags":["t"]}`
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/ui/api/secrets", strings.NewReader(createBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(ui.CSRFHeader, csrf)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("create status %d body %s", resp.StatusCode, b)
+	}
+
+	// GET without reveal — PUT with empty secret must be rejected
+	resp, err = client.Get(ts.URL + "/ui/api/secrets/edit-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get status %d", resp.StatusCode)
+	}
+
+	emptyPut := `{"type":"api_key","secret":"","username":"","url":"","tags":["t"],"notes":""}`
+	req, _ = http.NewRequest(http.MethodPut, ts.URL+"/ui/api/secrets/edit-test", strings.NewReader(emptyPut))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(ui.CSRFHeader, csrf)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("put empty secret status %d body %s, want 400", resp.StatusCode, b)
+	}
+
+	// Reveal then PUT with full payload succeeds
+	resp, err = client.Get(ts.URL + "/ui/api/secrets/edit-test?reveal=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("reveal status %d body %s", resp.StatusCode, b)
+	}
+	var revealed map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&revealed); err != nil {
+		t.Fatal(err)
+	}
+	if revealed["secret"] != "original-secret" {
+		t.Fatalf("revealed secret: %v", revealed["secret"])
+	}
+
+	updateBody := `{"type":"token","secret":"original-secret","username":"u","url":"https://example.com","tags":["t","updated"],"notes":"n"}`
+	req, _ = http.NewRequest(http.MethodPut, ts.URL+"/ui/api/secrets/edit-test", strings.NewReader(updateBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(ui.CSRFHeader, csrf)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("put with revealed payload status %d body %s", resp.StatusCode, b)
+	}
+
+	resp, err = client.Get(ts.URL + "/ui/api/secrets/edit-test?reveal=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("reveal after update status %d", resp.StatusCode)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&revealed); err != nil {
+		t.Fatal(err)
+	}
+	if revealed["secret"] != "original-secret" {
+		t.Fatalf("secret after update: %v", revealed["secret"])
+	}
+	if revealed["type"] != "token" {
+		t.Fatalf("type after update: %v", revealed["type"])
+	}
+	if revealed["username"] != "u" {
+		t.Fatalf("username after update: %v", revealed["username"])
+	}
+}
+
 func csrfFromJar(t *testing.T, jar *cookiejar.Jar, baseURL string) string {
 	t.Helper()
 	u, err := http.NewRequest(http.MethodGet, baseURL+"/ui/login", nil)

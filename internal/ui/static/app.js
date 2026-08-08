@@ -31,6 +31,17 @@ var AV = (function () {
     el.hidden = !message;
     if (message) {
       el.classList.add('error');
+      el.classList.remove('info');
+    }
+  }
+
+  function showInfo(el, message) {
+    if (!el) return;
+    el.textContent = message;
+    el.hidden = !message;
+    if (message) {
+      el.classList.add('info');
+      el.classList.remove('error');
     }
   }
 
@@ -39,6 +50,7 @@ var AV = (function () {
     el.textContent = '';
     el.hidden = true;
     el.classList.remove('error');
+    el.classList.remove('info');
   }
 
   function formatTime(value) {
@@ -139,7 +151,20 @@ var AV = (function () {
   function initLoginPage() {
     var form = document.getElementById('login-form');
     var errorEl = document.getElementById('login-error');
+    var vaultStatusEl = document.getElementById('login-vault-status');
     if (!form) return;
+
+    if (vaultStatusEl) {
+      apiFetch('/health').then(function (resp) {
+        if (!resp.ok) return null;
+        return resp.json();
+      }).then(function (data) {
+        if (!data) return;
+        var sealed = !!data.sealed;
+        vaultStatusEl.textContent = sealed ? 'Vault status: Sealed' : 'Vault status: Unsealed';
+        vaultStatusEl.classList.toggle('sealed', sealed);
+      }).catch(function () {});
+    }
 
     form.addEventListener('submit', function (e) {
       e.preventDefault();
@@ -328,14 +353,48 @@ var AV = (function () {
 
     if (editBtn && editForm) {
       editBtn.addEventListener('click', function () {
-        var data = content._secretData || {};
-        document.getElementById('edit-type').value = data.type || '';
-        document.getElementById('edit-secret').value = data.secret || '';
-        document.getElementById('edit-username').value = data.username || '';
-        document.getElementById('edit-url').value = data.url || '';
-        document.getElementById('edit-tags').value = tagsToString(data.tags);
-        document.getElementById('edit-notes').value = data.notes || '';
-        editForm.hidden = false;
+        function populateEditForm(data) {
+          var typeEl = document.getElementById('edit-type');
+          var typeVal = data.type || 'api_key';
+          if (typeEl) typeEl.value = typeVal;
+          document.getElementById('edit-secret').value = data.secret || '';
+          document.getElementById('edit-username').value = data.username || '';
+          document.getElementById('edit-url').value = data.url || '';
+          document.getElementById('edit-tags').value = tagsToString(data.tags);
+          document.getElementById('edit-notes').value = data.notes || '';
+          editForm.hidden = false;
+        }
+
+        if (content._revealed && content._secretData && content._secretData.secret) {
+          populateEditForm(content._secretData);
+          return;
+        }
+
+        clearMessage(messageEl);
+        editBtn.disabled = true;
+        apiFetch('/ui/api/secrets/' + encodeURIComponent(name) + '?reveal=1').then(function (resp) {
+          if (resp.status === 401) {
+            window.location.href = '/ui/login';
+            return null;
+          }
+          if (!resp.ok) {
+            return resp.json().then(function (data) {
+              showError(messageEl, (data && data.error) || 'Failed to reveal secret for editing');
+              return null;
+            });
+          }
+          return resp.json();
+        }).then(function (data) {
+          if (!data) return;
+          renderDetail(data, true);
+          if (copyBtn) copyBtn.disabled = false;
+          showInfo(messageEl, 'Secret revealed for editing.');
+          populateEditForm(data);
+        }).catch(function () {
+          showError(messageEl, 'Failed to reveal secret for editing');
+        }).finally(function () {
+          editBtn.disabled = false;
+        });
       });
     }
 

@@ -19,7 +19,13 @@
       <label for="new-name">Name</label>
       <input type="text" id="new-name" name="name" required>
       <label for="new-type">Type</label>
-      <input type="text" id="new-type" name="type" value="api_key" required>
+      <select id="new-type" name="type" required>
+        <option value="api_key" selected>api_key</option>
+        <option value="login">login</option>
+        <option value="ssh_key">ssh_key</option>
+        <option value="token">token</option>
+        <option value="note">note</option>
+      </select>
       <label for="new-secret">Secret</label>
       <input type="password" id="new-secret" name="secret" required>
       <label for="new-username">Username</label>

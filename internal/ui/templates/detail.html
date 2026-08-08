@@ -28,7 +28,13 @@
     <form id="edit-form" class="form-card" hidden>
       <h2>Edit secret</h2>
       <label for="edit-type">Type</label>
-      <input type="text" id="edit-type" name="type" required>
+      <select id="edit-type" name="type" required>
+        <option value="api_key">api_key</option>
+        <option value="login">login</option>
+        <option value="ssh_key">ssh_key</option>
+        <option value="token">token</option>
+        <option value="note">note</option>
+      </select>
       <label for="edit-secret">Secret</label>
       <input type="password" id="edit-secret" name="secret">
       <label for="edit-username">Username</label>

@@ -220,14 +220,14 @@ func (v *Vault) TryAutoUnseal(unsealKeyPath string) (bool, error) {
 }
 
 func (v *Vault) Put(actorLabel string, sec Secret) (Secret, error) {
-	if v.Sealed() {
-		return Secret{}, ErrSealed
-	}
 	if err := validateSecret(sec); err != nil {
 		return Secret{}, err
 	}
 
-	master := v.getMaster()
+	master, err := v.copyMaster()
+	if err != nil {
+		return Secret{}, err
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	secretBlob, err := crypto.Seal(master, []byte(sec.Secret))
@@ -318,8 +318,9 @@ func (v *Vault) Put(actorLabel string, sec Secret) (Secret, error) {
 }
 
 func (v *Vault) Get(actorLabel, name string, reveal bool) (Secret, error) {
-	if v.Sealed() {
-		return Secret{}, ErrSealed
+	master, err := v.copyMaster()
+	if err != nil {
+		return Secret{}, err
 	}
 
 	row, err := v.store.GetSecretByName(name)
@@ -340,7 +341,6 @@ func (v *Vault) Get(actorLabel, name string, reveal bool) (Secret, error) {
 		return sec, nil
 	}
 
-	master := v.getMaster()
 	secretPT, err := crypto.Open(master, crypto.EncryptedBlob{
 		Nonce:      row.SecretNonce,
 		Ciphertext: row.SecretCT,
@@ -366,41 +366,48 @@ func (v *Vault) Get(actorLabel, name string, reveal bool) (Secret, error) {
 }
 
 func (v *Vault) Delete(actorLabel, name string) error {
-	if v.Sealed() {
-		return ErrSealed
-	}
-	if err := v.store.DeleteSecret(name); err != nil {
-		return err
-	}
-	return v.store.AppendAudit(actorLabel, "delete", name)
+	return v.withUnsealed(func() error {
+		if err := v.store.DeleteSecret(name); err != nil {
+			return err
+		}
+		return v.store.AppendAudit(actorLabel, "delete", name)
+	})
 }
 
 func (v *Vault) List(actorLabel string) ([]Secret, error) {
-	if v.Sealed() {
-		return nil, ErrSealed
-	}
-	rows, err := v.store.ListSecrets()
+	var out []Secret
+	err := v.withUnsealed(func() error {
+		rows, err := v.store.ListSecrets()
+		if err != nil {
+			return err
+		}
+		out = make([]Secret, len(rows))
+		for i, row := range rows {
+			out[i] = rowToSecret(row, "", "")
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	out := make([]Secret, len(rows))
-	for i, row := range rows {
-		out[i] = rowToSecret(row, "", "")
 	}
 	return out, nil
 }
 
 func (v *Vault) Search(actorLabel, q, tag, typ string) ([]Secret, error) {
-	if v.Sealed() {
-		return nil, ErrSealed
-	}
-	rows, err := v.store.SearchSecrets(q, tag, typ)
+	var out []Secret
+	err := v.withUnsealed(func() error {
+		rows, err := v.store.SearchSecrets(q, tag, typ)
+		if err != nil {
+			return err
+		}
+		out = make([]Secret, len(rows))
+		for i, row := range rows {
+			out[i] = rowToSecret(row, "", "")
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	out := make([]Secret, len(rows))
-	for i, row := range rows {
-		out[i] = rowToSecret(row, "", "")
 	}
 	return out, nil
 }
@@ -435,10 +442,22 @@ func (v *Vault) ListAudit(limit int) ([]store.AuditRow, error) {
 	return v.store.ListAudit(limit)
 }
 
-func (v *Vault) getMaster() crypto.MasterKey {
+func (v *Vault) copyMaster() (crypto.MasterKey, error) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	return *v.master
+	if v.master == nil {
+		return crypto.MasterKey{}, ErrSealed
+	}
+	return *v.master, nil
+}
+
+func (v *Vault) withUnsealed(fn func() error) error {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	if v.master == nil {
+		return ErrSealed
+	}
+	return fn()
 }
 
 func validateSecret(sec Secret) error {

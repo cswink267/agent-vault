@@ -6,6 +6,9 @@
 #
 # Subsequent boots: omit AGENT_VAULT_INIT; the server opens the existing DB and auto-unseals via
 # AGENT_VAULT_UNSEAL_KEY when present.
+#
+# HTTPS (optional): docker compose --profile https up -d
+# Vault writes Caddyfile into caddy-config; Caddy mounts it read-only at /etc/caddy.
 
 services:
   agent-vault:
@@ -16,12 +19,29 @@ services:
       PORT: "8080"
       AGENT_VAULT_DATA_DIR: /data
       AGENT_VAULT_UNSEAL_KEY: /data/unseal.key
+      AGENT_VAULT_CADDY_CONFIG_DIR: /caddy-config
       # Required only for first init on an empty volume:
       AGENT_VAULT_INIT: ${AGENT_VAULT_INIT:-}
       AGENT_VAULT_PASSPHRASE: ${AGENT_VAULT_PASSPHRASE:-}
     volumes:
       - vault-data:/data
+      - caddy-config:/caddy-config
+    restart: unless-stopped
+
+  caddy:
+    profiles: ["https"]
+    image: caddy:2.8-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy-config:/etc/caddy:ro
+      - caddy-data:/data
+    depends_on:
+      - agent-vault
     restart: unless-stopped
 
 volumes:
   vault-data:
+  caddy-config:
+  caddy-data:

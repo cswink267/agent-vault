@@ -18,7 +18,7 @@ trap cleanup EXIT
 go build -o "$BIN_DIR/vault-server" ./cmd/vault-server
 go build -o "$BIN_DIR/vault" ./cmd/vault
 
-"$BIN_DIR/vault" init --data-dir "$DATA_DIR" --passphrase 'smoke-pass'
+"$BIN_DIR/vault" init --data-dir "$DATA_DIR" --passphrase 'smoke-pass' >/dev/null
 
 TOKEN=$(cat "$DATA_DIR/root.token")
 PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("",0)); print(s.getsockname()[1]); s.close()')

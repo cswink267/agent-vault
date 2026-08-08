@@ -88,6 +88,24 @@ vault rotate-master --passphrase '<current>'
 
 `rotate-master` generates a new master key, rewraps every secret DEK, rewrites `unseal.key`, and revokes bearer tokens (returns a new root token once). Passphrase stays the same unless you also run `change-passphrase`.
 
+## Backup & export
+
+On-demand disaster-recovery snapshots and portable encrypted exports. **Restore and import are CLI-only**; the Admin UI can download both artifacts.
+
+| Artifact | Extension | Contents | Sealed OK? |
+|----------|-----------|----------|------------|
+| Snapshot | `.avs.tar.gz` | `vault.db` + `unseal.key` + manifest | Yes |
+| Export | `.ave` | Secrets re-encrypted under a backup passphrase | No (vault must be unsealed) |
+
+```bash
+vault backup --out snapshot.avs.tar.gz          # download snapshot via API
+vault restore --in snapshot.avs.tar.gz --data-dir ./data [--force]  # local filesystem; stop server first
+vault export --passphrase '<backup-pass>' --out export.ave
+vault import --passphrase '<backup-pass>' --in export.ave [--overwrite]
+```
+
+In the Admin UI, open **Backup & export** on any authenticated page to **Download snapshot** or **Download export** (prompts for a backup passphrase). Treat `.avs.tar.gz` and `.ave` files as highly sensitive.
+
 ## MCP & agent skills
 
 Agent integration docs and MCP examples live under `skills/`:
@@ -123,6 +141,8 @@ Search endpoint: `GET /v1/search` (query params `q`, `tag`, `type`). This path r
 | `GET/PUT/DELETE /v1/secrets/{name}` | yes | Read / update / delete |
 | `GET /v1/search` | yes | Search by query, tag, type |
 | `GET /v1/audit` | yes | Audit log |
+| `GET /v1/backup/snapshot` | yes | Download snapshot archive |
+| `POST /v1/backup/export` | yes | Download encrypted export |
 | `POST /v1/tokens` | yes | Mint labeled API token |
 
 ## Environment variables
@@ -142,7 +162,6 @@ Search endpoint: `GET /v1/search` (query params `q`, `tag`, `type`). This path r
 Planned after Phase 1 is verified on beast:
 
 - HTTPS reverse-proxy Compose profile (Caddy/nginx + TLS) for cloud agents
-- Backup and export tooling
 - Secret rotation helpers
 
-Admin UI is available at `/ui` for human operators; agents should continue using MCP/CLI with bearer tokens.
+Backup/export tooling and Admin UI downloads are available (`vault backup` / `export` / `restore` / `import` and **Backup & export** in the UI). Admin UI is at `/ui` for human operators; agents should continue using MCP/CLI with bearer tokens.

@@ -45,6 +45,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /ui/api/change-passphrase", s.withSessionCSRF(s.handleChangePassphrase))
 	mux.HandleFunc("POST /ui/api/rotate-master", s.withSessionCSRF(s.handleRotateMaster))
 	mux.HandleFunc("GET /ui/api/audit", s.withSession(s.handleAudit))
+	mux.HandleFunc("GET /ui/api/backup/snapshot", s.withSession(s.handleBackupSnapshot))
+	mux.HandleFunc("POST /ui/api/backup/export", s.withSessionCSRF(s.handleBackupExport))
 
 	staticSub, _ := fs.Sub(staticFS, "static")
 	mux.Handle("GET /ui/static/{path...}", http.StripPrefix("/ui/static/", http.FileServer(http.FS(staticSub))))
@@ -309,6 +311,41 @@ func (s *Server) handleRotateMaster(w http.ResponseWriter, r *http.Request) {
 		"token": token,
 		"label": "root",
 	})
+}
+
+func (s *Server) handleBackupSnapshot(w http.ResponseWriter, r *http.Request) {
+	actor := actorFromContext(r.Context())
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"agent-vault-snapshot.avs.tar.gz\"")
+	if err := s.Vault.WriteSnapshot(actor, w); err != nil {
+		writeVaultError(w, err)
+		return
+	}
+}
+
+func (s *Server) handleBackupExport(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		BackupPassphrase string `json:"backup_passphrase"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if body.BackupPassphrase == "" {
+		writeError(w, http.StatusBadRequest, "backup_passphrase is required")
+		return
+	}
+
+	actor := actorFromContext(r.Context())
+	blob, err := s.Vault.BuildExport(actor, body.BackupPassphrase)
+	if err != nil {
+		writeVaultError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"agent-vault-export.ave\"")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(blob)
 }
 
 func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {

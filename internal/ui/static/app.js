@@ -71,6 +71,44 @@ var AV = (function () {
     return value.split(',').map(function (t) { return t.trim(); }).filter(Boolean);
   }
 
+  function triggerDownload(blob, filename) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadBackup(path, options, filename, statusEl) {
+    if (statusEl) statusEl.textContent = 'Preparing download…';
+    return apiFetch(path, options).then(function (resp) {
+      if (resp.status === 401) {
+        window.location.href = '/ui/login';
+        return null;
+      }
+      if (!resp.ok) {
+        return resp.json().then(function (data) {
+          if (statusEl) statusEl.textContent = (data && data.error) || 'Download failed';
+          return null;
+        }).catch(function () {
+          if (statusEl) statusEl.textContent = 'Download failed';
+          return null;
+        });
+      }
+      return resp.blob();
+    }).then(function (blob) {
+      if (!blob) return;
+      triggerDownload(blob, filename);
+      if (statusEl) statusEl.textContent = 'Download started.';
+    }).catch(function () {
+      if (statusEl) statusEl.textContent = 'Download failed';
+    });
+  }
+
   function updateVaultChrome(data) {
     var statusEl = document.getElementById('vault-status');
     var bannerEl = document.getElementById('sealed-banner');
@@ -237,6 +275,27 @@ var AV = (function () {
         }).catch(function () {
           if (statusEl) statusEl.textContent = 'Rotate failed';
         });
+      });
+    }
+
+    var snapshotBtn = document.getElementById('btn-backup-snapshot');
+    var exportBtn = document.getElementById('btn-backup-export');
+    var backupStatus = document.getElementById('backup-status');
+
+    if (snapshotBtn) {
+      snapshotBtn.addEventListener('click', function () {
+        downloadBackup('/ui/api/backup/snapshot', { method: 'GET' }, 'agent-vault-snapshot.avs.tar.gz', backupStatus);
+      });
+    }
+
+    if (exportBtn) {
+      exportBtn.addEventListener('click', function () {
+        var backupPass = window.prompt('Enter a backup passphrase for the export file:');
+        if (!backupPass) return;
+        downloadBackup('/ui/api/backup/export', {
+          method: 'POST',
+          body: JSON.stringify({ backup_passphrase: backupPass })
+        }, 'agent-vault-export.ave', backupStatus);
       });
     }
   }

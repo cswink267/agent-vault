@@ -511,6 +511,156 @@ func TestUIUpdateWithRevealedPayload(t *testing.T) {
 	}
 }
 
+func TestUIBackupSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	v, _, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uiSrv := ui.New(v)
+	ts := httptest.NewServer(uiSrv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/ui/api/backup/snapshot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("no session status %d want 401", resp.StatusCode)
+	}
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar}
+	resp, err = client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"pass"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	resp, err = client.Get(ts.URL + "/ui/api/backup/snapshot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("snapshot status %d body %s", resp.StatusCode, b)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if ct != "application/gzip" {
+		t.Fatalf("Content-Type %q want application/gzip", ct)
+	}
+	cd := resp.Header.Get("Content-Disposition")
+	if !strings.Contains(cd, "attachment") || !strings.Contains(cd, "agent-vault-snapshot.avs.tar.gz") {
+		t.Fatalf("Content-Disposition %q", cd)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) < 2 || data[0] != 0x1f || data[1] != 0x8b {
+		t.Fatalf("missing gzip magic: %x", data[:min(2, len(data))])
+	}
+}
+
+func TestUIBackupExport(t *testing.T) {
+	dir := t.TempDir()
+	v, _, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Put("root", vault.Secret{Name: "exp", Type: "api_key", Secret: "val"}); err != nil {
+		t.Fatal(err)
+	}
+	uiSrv := ui.New(v)
+	ts := httptest.NewServer(uiSrv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/ui/api/backup/export", "application/json", strings.NewReader(`{"backup_passphrase":"bp"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("no session export status %d want 401", resp.StatusCode)
+	}
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar}
+	resp, err = client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"pass"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	csrf := csrfFromJar(t, jar, ts.URL)
+
+	resp, err = client.Post(ts.URL+"/ui/api/backup/export", "application/json", strings.NewReader(`{"backup_passphrase":"bp"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("export without csrf status %d body %s", resp.StatusCode, b)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/ui/api/backup/export", strings.NewReader(`{"backup_passphrase":"bp"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(ui.CSRFHeader, csrf)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("export status %d body %s", resp.StatusCode, b)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if ct != "application/octet-stream" {
+		t.Fatalf("Content-Type %q want application/octet-stream", ct)
+	}
+	cd := resp.Header.Get("Content-Disposition")
+	if !strings.Contains(cd, "attachment") || !strings.Contains(cd, "agent-vault-export.ave") {
+		t.Fatalf("Content-Disposition %q", cd)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) < 4 || string(data[:4]) != "AVE1" {
+		t.Fatalf("missing AVE1 magic: %q", data[:min(4, len(data))])
+	}
+
+	v.Lock()
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/ui/api/backup/export", strings.NewReader(`{"backup_passphrase":"bp"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(ui.CSRFHeader, csrf)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("sealed export status %d body %s", resp.StatusCode, b)
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func csrfFromJar(t *testing.T, jar *cookiejar.Jar, baseURL string) string {
 	t.Helper()
 	u, err := http.NewRequest(http.MethodGet, baseURL+"/ui/login", nil)

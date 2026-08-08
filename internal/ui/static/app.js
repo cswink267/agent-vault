@@ -59,12 +59,19 @@ var AV = (function () {
     return value.split(',').map(function (t) { return t.trim(); }).filter(Boolean);
   }
 
-  function initAppChrome() {
+  function updateVaultChrome(data) {
     var statusEl = document.getElementById('vault-status');
     var lockBtn = document.getElementById('btn-lock');
-    var logoutBtn = document.getElementById('btn-logout');
+    var unlockBtn = document.getElementById('btn-unlock');
+    if (!data || !statusEl) return;
+    statusEl.textContent = data.sealed ? 'Sealed' : 'Unlocked';
+    statusEl.classList.toggle('sealed', !!data.sealed);
+    if (lockBtn) lockBtn.hidden = !!data.sealed;
+    if (unlockBtn) unlockBtn.hidden = !data.sealed;
+  }
 
-    apiFetch('/ui/api/status').then(function (resp) {
+  function refreshVaultStatus() {
+    return apiFetch('/ui/api/status').then(function (resp) {
       if (!resp.ok) {
         if (resp.status === 401) {
           window.location.href = '/ui/login';
@@ -73,10 +80,17 @@ var AV = (function () {
       }
       return resp.json();
     }).then(function (data) {
-      if (!data || !statusEl) return;
-      statusEl.textContent = data.sealed ? 'Sealed' : 'Unlocked';
-      statusEl.classList.toggle('sealed', !!data.sealed);
+      if (data) updateVaultChrome(data);
+      return data;
     });
+  }
+
+  function initAppChrome() {
+    var lockBtn = document.getElementById('btn-lock');
+    var unlockBtn = document.getElementById('btn-unlock');
+    var logoutBtn = document.getElementById('btn-logout');
+
+    refreshVaultStatus();
 
     if (lockBtn) {
       lockBtn.addEventListener('click', function () {
@@ -84,6 +98,29 @@ var AV = (function () {
           if (resp.ok) {
             window.location.reload();
           }
+        });
+      });
+    }
+
+    if (unlockBtn) {
+      unlockBtn.addEventListener('click', function () {
+        var passphrase = window.prompt('Enter vault passphrase to unlock:');
+        if (!passphrase) return;
+        apiFetch('/ui/api/unlock', {
+          method: 'POST',
+          body: JSON.stringify({ passphrase: passphrase })
+        }).then(function (resp) {
+          return resp.json().then(function (data) {
+            return { ok: resp.ok, data: data };
+          });
+        }).then(function (result) {
+          if (result.ok) {
+            window.location.reload();
+            return;
+          }
+          window.alert((result.data && result.data.error) || 'Unlock failed');
+        }).catch(function () {
+          window.alert('Unlock failed');
         });
       });
     }

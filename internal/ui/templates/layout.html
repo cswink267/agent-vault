@@ -1,3 +1,8 @@
+{{define "head"}}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+{{end}}
 {{define "nav"}}
 <header class="site-header">
   <div class="header-inner">
@@ -9,6 +14,7 @@
     </nav>
     <div class="header-actions">
       <span id="vault-status" class="status-badge" aria-live="polite"></span>
+      <button type="button" id="btn-unlock" class="btn btn-primary" hidden>Unlock</button>
       <button type="button" id="btn-lock" class="btn btn-secondary">Lock</button>
       <button type="button" id="btn-logout" class="btn btn-secondary">Logout</button>
     </div>

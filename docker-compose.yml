@@ -1,0 +1,20 @@
+# Convenience wrapper — canonical file is deploy/docker-compose.yml (build: ..).
+# From repo root: docker compose up --build
+
+services:
+  agent-vault:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      AGENT_VAULT_DATA_DIR: /data
+      AGENT_VAULT_UNSEAL_KEY: /data/unseal.key
+      AGENT_VAULT_INIT: ${AGENT_VAULT_INIT:-}
+      AGENT_VAULT_PASSPHRASE: ${AGENT_VAULT_PASSPHRASE}
+    volumes:
+      - vault-data:/data
+    restart: unless-stopped
+
+volumes:
+  vault-data:

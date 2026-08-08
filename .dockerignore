@@ -1,0 +1,9 @@
+.git
+.gitignore
+.superpowers
+bin/
+vault-server
+vault
+vault-mcp
+*.md
+docs/

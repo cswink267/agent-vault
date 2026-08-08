@@ -521,13 +521,13 @@ func TestUIBackupSnapshot(t *testing.T) {
 	ts := httptest.NewServer(uiSrv.Handler())
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/ui/api/backup/snapshot")
+	resp, err := http.Post(ts.URL+"/ui/api/backup/snapshot", "application/json", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("no session status %d want 401", resp.StatusCode)
+		t.Fatalf("no session snapshot status %d want 401", resp.StatusCode)
 	}
 
 	jar, err := cookiejar.New(nil)
@@ -540,8 +540,33 @@ func TestUIBackupSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
+	csrf := csrfFromJar(t, jar, ts.URL)
+	if csrf == "" {
+		t.Fatal("missing CSRF cookie after login")
+	}
 
 	resp, err = client.Get(ts.URL + "/ui/api/backup/snapshot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("GET snapshot status %d want 405", resp.StatusCode)
+	}
+
+	resp, err = client.Post(ts.URL+"/ui/api/backup/snapshot", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("snapshot without csrf status %d body %s", resp.StatusCode, b)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/ui/api/backup/snapshot", nil)
+	req.Header.Set(ui.CSRFHeader, csrf)
+	resp, err = client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

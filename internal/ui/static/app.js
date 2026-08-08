@@ -284,7 +284,7 @@ var AV = (function () {
 
     if (snapshotBtn) {
       snapshotBtn.addEventListener('click', function () {
-        downloadBackup('/ui/api/backup/snapshot', { method: 'GET' }, 'agent-vault-snapshot.avs.tar.gz', backupStatus);
+        downloadBackup('/ui/api/backup/snapshot', { method: 'POST' }, 'agent-vault-snapshot.avs.tar.gz', backupStatus);
       });
     }
 

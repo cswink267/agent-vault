@@ -15,6 +15,18 @@ const MasterKeySize = 32
 
 type MasterKey [MasterKeySize]byte
 
+type KDFParams struct {
+	Time      uint32
+	MemoryKiB uint32
+	Threads   uint8
+}
+
+var DefaultKDFParams = KDFParams{
+	Time:      3,
+	MemoryKiB: 64 * 1024,
+	Threads:   4,
+}
+
 type EncryptedBlob struct {
 	Nonce      []byte
 	Ciphertext []byte
@@ -38,12 +50,18 @@ func NewSalt() ([]byte, error) {
 }
 
 func DeriveKey(passphrase string, salt []byte) (MasterKey, error) {
+	return DeriveKeyWithParams(passphrase, salt, DefaultKDFParams)
+}
+
+func DeriveKeyWithParams(passphrase string, salt []byte, params KDFParams) (MasterKey, error) {
 	var k MasterKey
 	if len(salt) < 16 {
 		return k, errors.New("salt must be at least 16 bytes")
 	}
-	// time=3, memory=64MiB, threads=4, keyLen=32
-	out := argon2.IDKey([]byte(passphrase), salt, 3, 64*1024, 4, MasterKeySize)
+	if params.Time == 0 || params.MemoryKiB == 0 || params.Threads == 0 {
+		return k, errors.New("invalid KDF parameters")
+	}
+	out := argon2.IDKey([]byte(passphrase), salt, params.Time, params.MemoryKiB, params.Threads, MasterKeySize)
 	copy(k[:], out)
 	return k, nil
 }

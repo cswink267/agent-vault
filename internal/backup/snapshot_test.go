@@ -1,7 +1,9 @@
 package backup_test
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"os"
 	"path/filepath"
 	"testing"
@@ -74,4 +76,60 @@ func TestVacuumIntoAndSnapshotRoundTrip(t *testing.T) {
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("unseal.key mode: got %o want 0600", info.Mode().Perm())
 	}
+}
+
+func TestExtractInvalidSnapshotDoesNotOverwriteDestination(t *testing.T) {
+	destDir := t.TempDir()
+	dbPath := filepath.Join(destDir, "vault.db")
+	if err := os.WriteFile(dbPath, []byte("existing-db"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	archive := invalidSnapshotTarGz(t, map[string][]byte{
+		"vault.db": []byte("new-db"),
+	})
+	if _, err := backup.ExtractSnapshotTarGz(bytes.NewReader(archive), destDir); err == nil {
+		t.Fatal("expected invalid snapshot error")
+	}
+
+	got, err := os.ReadFile(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "existing-db" {
+		t.Fatalf("vault.db overwritten on invalid archive: %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(destDir, "unseal.key")); !os.IsNotExist(err) {
+		t.Fatalf("unseal.key should not be written on invalid archive, err=%v", err)
+	}
+}
+
+func invalidSnapshotTarGz(t *testing.T, members map[string][]byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+	for name, data := range members {
+		mode := int64(0o600)
+		if name == "manifest.json" {
+			mode = 0o644
+		}
+		if err := tw.WriteHeader(&tar.Header{
+			Name: name,
+			Mode: mode,
+			Size: int64(len(data)),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
 }

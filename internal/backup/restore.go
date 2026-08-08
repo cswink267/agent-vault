@@ -24,10 +24,20 @@ func RestoreSnapshotFile(in, dataDir string, force bool) error {
 	}
 	defer f.Close()
 
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	stagingDir, err := os.MkdirTemp("", "agent-vault-restore-*")
+	if err != nil {
 		return err
 	}
+	defer os.RemoveAll(stagingDir)
 
-	_, err = ExtractSnapshotTarGz(f, dataDir)
-	return err
+	if _, err := ExtractSnapshotTarGz(f, stagingDir); err != nil {
+		return err
+	}
+	if err := installSnapshotMembers(stagingDir, dataDir, []string{"vault.db", "unseal.key"}); err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(dataDir, "root.token")); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }

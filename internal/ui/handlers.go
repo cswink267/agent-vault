@@ -45,7 +45,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /ui/api/change-passphrase", s.withSessionCSRF(s.handleChangePassphrase))
 	mux.HandleFunc("POST /ui/api/rotate-master", s.withSessionCSRF(s.handleRotateMaster))
 	mux.HandleFunc("GET /ui/api/audit", s.withSession(s.handleAudit))
-	mux.HandleFunc("GET /ui/api/backup/snapshot", s.withSession(s.handleBackupSnapshot))
+	mux.HandleFunc("POST /ui/api/backup/snapshot", s.withSessionCSRF(s.handleBackupSnapshot))
 	mux.HandleFunc("POST /ui/api/backup/export", s.withSessionCSRF(s.handleBackupExport))
 
 	staticSub, _ := fs.Sub(staticFS, "static")

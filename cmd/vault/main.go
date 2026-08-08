@@ -93,7 +93,7 @@ Commands:
   import              Import secrets from export (--passphrase, --in, --overwrite)
 
 Environment:
-  AGENT_VAULT_URL    Base URL for remote commands (default http://localhost:8080)
+  AGENT_VAULT_URL    Base URL for remote commands (default http://localhost:8200)
   AGENT_VAULT_TOKEN  Bearer token for remote commands
 `)
 }
@@ -544,7 +544,7 @@ func timestampForFilename() string {
 }
 
 func newClient() (*client.Client, error) {
-	baseURL := envOr("AGENT_VAULT_URL", "http://localhost:8080")
+	baseURL := envOr("AGENT_VAULT_URL", "http://localhost:8200")
 	token := os.Getenv("AGENT_VAULT_TOKEN")
 	if token == "" {
 		return nil, fmt.Errorf("AGENT_VAULT_TOKEN is required")

@@ -1,7 +1,7 @@
 # Agent Vault — Design Spec
 
 **Date:** 2026-08-08  
-**Status:** Draft for review  
+**Status:** Ready for user review  
 **Repo:** `agent-vault`
 
 ## Purpose

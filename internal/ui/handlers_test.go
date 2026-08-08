@@ -1,0 +1,225 @@
+package ui_test
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/cookiejar"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/cswink267/agent-vault/internal/ui"
+	"github.com/cswink267/agent-vault/internal/vault"
+)
+
+func TestUILoginCRUDRevealAndCSRF(t *testing.T) {
+	dir := t.TempDir()
+	v, _, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uiSrv := ui.New(v)
+	ts := httptest.NewServer(uiSrv.Handler())
+	defer ts.Close()
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar}
+
+	// login
+	resp, err := client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"pass"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("login status %d body %s", resp.StatusCode, b)
+	}
+	var loginBody map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&loginBody); err != nil {
+		t.Fatal(err)
+	}
+	if loginBody["ok"] != true {
+		t.Fatalf("login ok: %v", loginBody["ok"])
+	}
+	if loginBody["sealed"] != false {
+		t.Fatalf("login sealed: %v", loginBody["sealed"])
+	}
+
+	csrf := csrfFromJar(t, jar, ts.URL)
+	if csrf == "" {
+		t.Fatal("missing CSRF cookie after login")
+	}
+
+	// POST secret without CSRF → 403
+	resp, err = client.Post(ts.URL+"/ui/api/secrets", "application/json", strings.NewReader(`{"name":"k","type":"api_key","secret":"abc","tags":["t"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("post without csrf status %d body %s", resp.StatusCode, b)
+	}
+
+	// POST with CSRF → 201
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/ui/api/secrets", strings.NewReader(`{"name":"k","type":"api_key","secret":"abc","tags":["t"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(ui.CSRFHeader, csrf)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("post with csrf status %d body %s", resp.StatusCode, b)
+	}
+
+	// GET list → no secret field
+	resp, err = client.Get(ts.URL + "/ui/api/secrets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list status %d", resp.StatusCode)
+	}
+	var list []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("list len %d", len(list))
+	}
+	if _, ok := list[0]["secret"]; ok {
+		t.Fatalf("list must not include secret: %v", list[0])
+	}
+	if _, ok := list[0]["username"]; ok {
+		t.Fatalf("list must not include username: %v", list[0])
+	}
+
+	// GET ?reveal=1 → secret present
+	resp, err = client.Get(ts.URL + "/ui/api/secrets/k?reveal=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("reveal status %d body %s", resp.StatusCode, b)
+	}
+	var revealed map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&revealed); err != nil {
+		t.Fatal(err)
+	}
+	if revealed["secret"] != "abc" {
+		t.Fatalf("revealed secret: %v", revealed["secret"])
+	}
+
+	// lock → sealed; reveal → 503
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/ui/api/lock", nil)
+	req.Header.Set(ui.CSRFHeader, csrf)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("lock status %d body %s", resp.StatusCode, b)
+	}
+
+	resp, err = client.Get(ts.URL + "/ui/api/secrets/k?reveal=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("reveal when sealed status %d body %s", resp.StatusCode, b)
+	}
+
+	// unlock via /ui/api/unlock with passphrase + CSRF
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/ui/api/unlock", strings.NewReader(`{"passphrase":"pass"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(ui.CSRFHeader, csrf)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("unlock status %d body %s", resp.StatusCode, b)
+	}
+
+	resp, err = client.Get(ts.URL + "/ui/api/secrets/k?reveal=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("reveal after unlock status %d body %s", resp.StatusCode, b)
+	}
+}
+
+func TestUILoginWrongPassphrase(t *testing.T) {
+	dir := t.TempDir()
+	v, _, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uiSrv := ui.New(v)
+	ts := httptest.NewServer(uiSrv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"wrong"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("wrong passphrase status %d body %s", resp.StatusCode, b)
+	}
+}
+
+func TestUIAPIRequiresSession(t *testing.T) {
+	dir := t.TempDir()
+	v, _, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uiSrv := ui.New(v)
+	ts := httptest.NewServer(uiSrv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/ui/api/secrets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated list status %d", resp.StatusCode)
+	}
+}
+
+func csrfFromJar(t *testing.T, jar *cookiejar.Jar, baseURL string) string {
+	t.Helper()
+	u, err := http.NewRequest(http.MethodGet, baseURL+"/ui/login", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range jar.Cookies(u.URL) {
+		if c.Name == ui.CSRFCookie {
+			return c.Value
+		}
+	}
+	return ""
+}

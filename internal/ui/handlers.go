@@ -1,0 +1,394 @@
+package ui
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/cswink267/agent-vault/internal/store"
+	"github.com/cswink267/agent-vault/internal/vault"
+)
+
+type contextKey string
+
+const actorLabelKey contextKey = "actorLabel"
+
+type Server struct {
+	Vault    *vault.Vault
+	Sessions *Sessions
+}
+
+func New(v *vault.Vault) *Server {
+	return &Server{
+		Vault:    v,
+		Sessions: NewSessions(0, 0),
+	}
+}
+
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /ui/login", s.handleLogin)
+	mux.HandleFunc("POST /ui/logout", s.handleLogout)
+	mux.HandleFunc("GET /ui/api/status", s.withSession(s.handleStatus))
+	mux.HandleFunc("GET /ui/api/secrets", s.withSession(s.handleListSecrets))
+	mux.HandleFunc("POST /ui/api/secrets", s.withSessionCSRF(s.handleCreateSecret))
+	mux.HandleFunc("GET /ui/api/secrets/{name}", s.withSession(s.handleGetSecret))
+	mux.HandleFunc("PUT /ui/api/secrets/{name}", s.withSessionCSRF(s.handleUpdateSecret))
+	mux.HandleFunc("DELETE /ui/api/secrets/{name}", s.withSessionCSRF(s.handleDeleteSecret))
+	mux.HandleFunc("GET /ui/api/search", s.withSession(s.handleSearch))
+	mux.HandleFunc("POST /ui/api/lock", s.withSessionCSRF(s.handleLock))
+	mux.HandleFunc("POST /ui/api/unlock", s.withSessionCSRF(s.handleUnlock))
+	mux.HandleFunc("GET /ui/api/audit", s.withSession(s.handleAudit))
+	return mux
+}
+
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Passphrase string `json:"passphrase"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if body.Passphrase == "" {
+		writeError(w, http.StatusBadRequest, "passphrase required")
+		return
+	}
+
+	id, csrf, err := s.Sessions.Create()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "session error")
+		return
+	}
+	actor := actorLabel(id)
+
+	if err := s.Vault.LoginWithPassphrase(body.Passphrase, actor); err != nil {
+		s.Sessions.Delete(id)
+		if errors.Is(err, vault.ErrInvalidMasterKey) {
+			writeError(w, http.StatusUnauthorized, "invalid passphrase")
+			return
+		}
+		writeError(w, http.StatusUnauthorized, "login failed")
+		return
+	}
+
+	SetSessionCookies(w, r, id, csrf)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"ok":     true,
+		"sealed": s.Vault.Sealed(),
+	})
+}
+
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if id := SessionIDFromRequest(r); id != "" {
+		s.Sessions.Delete(id)
+	}
+	ClearSessionCookies(w, r)
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"sealed":        s.Vault.Sealed(),
+		"authenticated": true,
+	})
+}
+
+func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request) {
+	actor := actorFromContext(r.Context())
+	secrets, err := s.Vault.List(actor)
+	if err != nil {
+		writeVaultError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, secretListToJSON(secrets))
+}
+
+func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
+	sec, err := decodeSecret(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	actor := actorFromContext(r.Context())
+	out, err := s.Vault.Create(actor, sec)
+	if err != nil {
+		writeVaultError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, secretToJSON(out, false))
+}
+
+func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	reveal := r.URL.Query().Get("reveal") == "1"
+	actor := actorFromContext(r.Context())
+
+	sec, err := s.Vault.Get(actor, name, reveal)
+	if err != nil {
+		writeVaultError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, secretToJSON(sec, reveal))
+}
+
+func (s *Server) handleUpdateSecret(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	sec, err := decodeSecret(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	sec.Name = name
+
+	actor := actorFromContext(r.Context())
+	if _, err := s.Vault.Get(actor, name, false); errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	} else if err != nil {
+		writeVaultError(w, err)
+		return
+	}
+
+	out, err := s.Vault.Put(actor, sec)
+	if err != nil {
+		writeVaultError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, secretToJSON(out, false))
+}
+
+func (s *Server) handleDeleteSecret(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	actor := actorFromContext(r.Context())
+	if err := s.Vault.Delete(actor, name); err != nil {
+		writeVaultError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	tag := r.URL.Query().Get("tag")
+	typ := r.URL.Query().Get("type")
+	actor := actorFromContext(r.Context())
+
+	secrets, err := s.Vault.Search(actor, q, tag, typ)
+	if err != nil {
+		writeVaultError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, secretListToJSON(secrets))
+}
+
+func (s *Server) handleLock(w http.ResponseWriter, r *http.Request) {
+	actor := actorFromContext(r.Context())
+	if err := s.Vault.LockWithAudit(actor); err != nil {
+		writeVaultError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Passphrase string `json:"passphrase"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if body.Passphrase == "" {
+		writeError(w, http.StatusBadRequest, "passphrase required")
+		return
+	}
+
+	actor := actorFromContext(r.Context())
+	if err := s.Vault.UnlockWithPassphrase(body.Passphrase, actor); err != nil {
+		if errors.Is(err, vault.ErrInvalidMasterKey) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, "unlock failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid limit")
+			return
+		}
+		limit = n
+	}
+
+	rows, err := s.Vault.ListAudit(limit)
+	if err != nil {
+		writeVaultError(w, err)
+		return
+	}
+	out := make([]map[string]interface{}, len(rows))
+	for i, row := range rows {
+		out[i] = map[string]interface{}{
+			"id":          row.ID,
+			"timestamp":   row.Timestamp,
+			"token_label": row.TokenLabel,
+			"action":      row.Action,
+			"secret_name": row.SecretName,
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) withSession(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := SessionIDFromRequest(r)
+		if id == "" || !s.Sessions.Get(id) {
+			writeError(w, http.StatusUnauthorized, "session required")
+			return
+		}
+		ctx := context.WithValue(r.Context(), actorLabelKey, actorLabel(id))
+		next(w, r.WithContext(ctx))
+	}
+}
+
+func (s *Server) withSessionCSRF(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := SessionIDFromRequest(r)
+		if id == "" || !s.Sessions.Get(id) {
+			writeError(w, http.StatusUnauthorized, "session required")
+			return
+		}
+		csrf, ok := s.Sessions.CSRF(id)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "session required")
+			return
+		}
+		if r.Header.Get(CSRFHeader) != csrf {
+			writeError(w, http.StatusForbidden, "csrf token mismatch")
+			return
+		}
+		ctx := context.WithValue(r.Context(), actorLabelKey, actorLabel(id))
+		next(w, r.WithContext(ctx))
+	}
+}
+
+func actorLabel(sessionID string) string {
+	if len(sessionID) >= 8 {
+		return "ui:" + sessionID[:8]
+	}
+	return "ui"
+}
+
+func actorFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(actorLabelKey).(string); ok {
+		return v
+	}
+	return ""
+}
+
+func decodeJSON(r *http.Request, v interface{}) error {
+	defer r.Body.Close()
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	return dec.Decode(v)
+}
+
+func decodeSecret(r *http.Request) (vault.Secret, error) {
+	var body struct {
+		Name     string            `json:"name"`
+		Type     string            `json:"type"`
+		Secret   string            `json:"secret"`
+		Username string            `json:"username"`
+		URL      string            `json:"url"`
+		Tags     []string          `json:"tags"`
+		Notes    string            `json:"notes"`
+		Metadata map[string]string `json:"metadata"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		return vault.Secret{}, errors.New("invalid JSON")
+	}
+	return vault.Secret{
+		Name:     body.Name,
+		Type:     body.Type,
+		Secret:   body.Secret,
+		Username: body.Username,
+		URL:      body.URL,
+		Tags:     body.Tags,
+		Notes:    body.Notes,
+		Metadata: body.Metadata,
+	}, nil
+}
+
+func secretToJSON(sec vault.Secret, includeSensitive bool) map[string]interface{} {
+	out := map[string]interface{}{
+		"id":         sec.ID,
+		"name":       sec.Name,
+		"type":       sec.Type,
+		"url":        sec.URL,
+		"tags":       sec.Tags,
+		"notes":      sec.Notes,
+		"metadata":   sec.Metadata,
+		"created_at": sec.CreatedAt,
+		"updated_at": sec.UpdatedAt,
+		"version":    sec.Version,
+	}
+	if includeSensitive {
+		out["secret"] = sec.Secret
+		if sec.Username != "" {
+			out["username"] = sec.Username
+		}
+	}
+	return out
+}
+
+func secretListToJSON(secrets []vault.Secret) []map[string]interface{} {
+	out := make([]map[string]interface{}, len(secrets))
+	for i, sec := range secrets {
+		out[i] = secretToJSON(sec, false)
+	}
+	return out
+}
+
+func writeJSON(w http.ResponseWriter, status int, v interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+func writeVaultError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, vault.ErrSealed):
+		writeError(w, http.StatusServiceUnavailable, "vault is sealed")
+	case errors.Is(err, store.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not found")
+	case errors.Is(err, store.ErrConflict):
+		writeError(w, http.StatusConflict, "conflict")
+	default:
+		if isValidationError(err) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal error")
+	}
+}
+
+func isValidationError(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "required") ||
+		strings.Contains(msg, "invalid type") ||
+		strings.Contains(msg, "invalid")
+}

@@ -10,7 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/cswink267/agent-vault/internal/backup"
 	"github.com/cswink267/agent-vault/internal/client"
 	"github.com/cswink267/agent-vault/internal/vault"
 	"golang.org/x/term"
@@ -53,6 +55,14 @@ func run(cmd string, args []string) error {
 		return cmdAudit(args)
 	case "token":
 		return cmdToken(args)
+	case "backup":
+		return cmdBackup(args)
+	case "restore":
+		return cmdRestore(args)
+	case "export":
+		return cmdExport(args)
+	case "import":
+		return cmdImport(args)
 	case "help", "-h", "--help":
 		usage()
 		return nil
@@ -77,6 +87,10 @@ Commands:
   delete              Delete a secret
   audit               Show audit log
   token               Token management (create)
+  backup              Download snapshot archive (--out)
+  restore             Restore snapshot to data directory (--in, --data-dir, --force)
+  export              Download encrypted export (--passphrase, --out)
+  import              Import secrets from export (--passphrase, --in, --overwrite)
 
 Environment:
   AGENT_VAULT_URL    Base URL for remote commands (default http://localhost:8080)
@@ -370,6 +384,132 @@ func cmdToken(args []string) error {
 	}
 }
 
+func cmdBackup(args []string) error {
+	fs := flag.NewFlagSet("backup", flag.ContinueOnError)
+	out := fs.String("out", "", "output file path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	outPath := *out
+	if outPath == "" {
+		outPath = defaultSnapshotFilename()
+	}
+	c, err := newClient()
+	if err != nil {
+		return err
+	}
+	f, err := os.Create(outPath)
+	if err != nil {
+		return err
+	}
+	if err := c.DownloadSnapshot(f); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	fmt.Printf("snapshot written to %s\n", outPath)
+	return nil
+}
+
+func cmdRestore(args []string) error {
+	fs := flag.NewFlagSet("restore", flag.ContinueOnError)
+	in := fs.String("in", "", "snapshot file path")
+	dataDir := fs.String("data-dir", "./data", "vault data directory")
+	force := fs.Bool("force", false, "overwrite existing vault.db")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *in == "" {
+		return fmt.Errorf("--in is required")
+	}
+	if err := backup.RestoreSnapshotFile(*in, *dataDir, *force); err != nil {
+		return err
+	}
+	fmt.Printf("snapshot restored to %s\n", *dataDir)
+	return nil
+}
+
+func cmdExport(args []string) error {
+	fs := flag.NewFlagSet("export", flag.ContinueOnError)
+	passphrase := fs.String("passphrase", "", "backup passphrase")
+	out := fs.String("out", "", "output file path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	pass := *passphrase
+	if pass == "" {
+		fmt.Fprint(os.Stderr, "Backup passphrase: ")
+		var err error
+		pass, err = readPassphrase()
+		if err != nil {
+			return err
+		}
+	}
+	outPath := *out
+	if outPath == "" {
+		outPath = defaultExportFilename()
+	}
+	c, err := newClient()
+	if err != nil {
+		return err
+	}
+	f, err := os.Create(outPath)
+	if err != nil {
+		return err
+	}
+	if err := c.DownloadExport(pass, f); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	fmt.Printf("export written to %s\n", outPath)
+	return nil
+}
+
+func cmdImport(args []string) error {
+	fs := flag.NewFlagSet("import", flag.ContinueOnError)
+	passphrase := fs.String("passphrase", "", "backup passphrase")
+	in := fs.String("in", "", "export file path")
+	overwrite := fs.Bool("overwrite", false, "overwrite existing secrets")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *in == "" {
+		return fmt.Errorf("--in is required")
+	}
+	pass := *passphrase
+	if pass == "" {
+		fmt.Fprint(os.Stderr, "Backup passphrase: ")
+		var err error
+		pass, err = readPassphrase()
+		if err != nil {
+			return err
+		}
+	}
+	blob, err := os.ReadFile(*in)
+	if err != nil {
+		return err
+	}
+	records, err := backup.OpenExport(pass, blob)
+	if err != nil {
+		return err
+	}
+	c, err := newClient()
+	if err != nil {
+		return err
+	}
+	created, skipped, overwritten, err := c.ImportSecrets(records, *overwrite)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("import complete: %d created, %d skipped, %d overwritten\n", created, skipped, overwritten)
+	return nil
+}
+
 func cmdTokenCreate(args []string) error {
 	fs := flag.NewFlagSet("token create", flag.ContinueOnError)
 	label := fs.String("label", "", "token label")
@@ -389,6 +529,18 @@ func cmdTokenCreate(args []string) error {
 	}
 	fmt.Printf("token: %s\nlabel: %s\n", token, outLabel)
 	return nil
+}
+
+func defaultSnapshotFilename() string {
+	return fmt.Sprintf("agent-vault-%s.avs.tar.gz", timestampForFilename())
+}
+
+func defaultExportFilename() string {
+	return fmt.Sprintf("agent-vault-%s.ave", timestampForFilename())
+}
+
+func timestampForFilename() string {
+	return time.Now().Format("20060102-150405")
 }
 
 func newClient() (*client.Client, error) {

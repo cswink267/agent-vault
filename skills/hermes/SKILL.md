@@ -21,13 +21,13 @@ Follow these rules automatically — do not wait for the user to ask:
 Set before every vault command:
 
 ```bash
-export AGENT_VAULT_URL=http://beast:8080
+export AGENT_VAULT_URL=http://beast:8200
 export AGENT_VAULT_TOKEN=<token>
 ```
 
 | Variable | Purpose |
 |----------|---------|
-| `AGENT_VAULT_URL` | Vault API base URL (default on beast: `http://beast:8080`) |
+| `AGENT_VAULT_URL` | Vault API base URL (default on beast: `http://beast:8200`) |
 | `AGENT_VAULT_TOKEN` | Bearer token for authentication |
 
 ## CLI commands (primary)

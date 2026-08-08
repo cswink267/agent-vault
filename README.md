@@ -43,10 +43,10 @@ docker compose -f deploy/docker-compose.yml up -d
 Health check:
 
 ```bash
-curl -s http://localhost:8080/health
+curl -s http://localhost:8200/health
 ```
 
-The server binds `0.0.0.0:$PORT` (default `8080`). All vault state (`vault.db`, `unseal.key`, `root.token`) lives only on the `/data` volume.
+Compose publishes host **8200** → container `8080` (beast `:8080` is already taken by filebrowser). Inside the container the server still binds `0.0.0.0:$PORT` (default `8080`). All vault state (`vault.db`, `unseal.key`, `root.token`) lives only on the `/data` volume.
 
 ### Local init (without container entrypoint)
 
@@ -60,7 +60,7 @@ AGENT_VAULT_DATA_DIR=./data PORT=8080 ./bin/vault-server
 Remote commands use the HTTP API:
 
 ```bash
-export AGENT_VAULT_URL=http://beast:8080   # or http://localhost:8080 locally
+export AGENT_VAULT_URL=http://beast:8200   # or http://localhost:8200 locally
 export AGENT_VAULT_TOKEN=<token-from-init>
 
 vault set --name openai.api_key --type api_key --secret "<value>" --tags cursor,openai
@@ -87,7 +87,7 @@ Set `AGENT_VAULT_URL` and `AGENT_VAULT_TOKEN` in the MCP server env. Ensure `vau
 - **Unseal key** — `/data/unseal.key` is written with mode `0600` at init. Restrict volume access on the host; anyone with read access to this file can unseal the vault.
 - **Root token** — Treat like a password. Save from init logs or `/data/root.token`; mint scoped tokens via `POST /v1/tokens` for agents.
 - **Passphrase** — Required only for init or manual unlock (`POST /v1/unlock`). Do not commit it to git or bake it into images.
-- **Network** — Phase 1 serves plain HTTP on the private network. Do not expose port 8080 to the public internet without TLS.
+- **Network** — Phase 1 serves plain HTTP on the private network. Do not expose host port 8200 (or the container port) to the public internet without TLS.
 
 ## HTTP API
 
@@ -113,7 +113,7 @@ Search endpoint: `GET /v1/search` (query params `q`, `tag`, `type`). This path r
 | `AGENT_VAULT_UNSEAL_KEY` | `$DATA_DIR/unseal.key` | Auto-unseal key file path |
 | `AGENT_VAULT_PASSPHRASE` | — | Passphrase for first-time init |
 | `AGENT_VAULT_INIT` | — | Set to `1` to allow init when DB is missing |
-| `AGENT_VAULT_URL` | `http://localhost:8080` | CLI/MCP API base URL |
+| `AGENT_VAULT_URL` | `http://localhost:8200` | CLI/MCP API base URL (Compose host port) |
 | `AGENT_VAULT_TOKEN` | — | Bearer token for CLI/MCP |
 
 ## Phase 2 preview

@@ -22,7 +22,7 @@ Set these before calling vault tools or CLI:
 
 | Variable | Purpose |
 |----------|---------|
-| `AGENT_VAULT_URL` | Vault API base URL (default on beast: `http://beast:8080`) |
+| `AGENT_VAULT_URL` | Vault API base URL (default on beast: `http://beast:8200`) |
 | `AGENT_VAULT_TOKEN` | Bearer token for authentication |
 
 ## MCP tools (preferred)
@@ -57,7 +57,7 @@ Call `vault_set` with:
 When MCP is not configured, use the `vault` CLI:
 
 ```bash
-export AGENT_VAULT_URL=http://beast:8080
+export AGENT_VAULT_URL=http://beast:8200
 export AGENT_VAULT_TOKEN=<token>
 
 vault set --name openai.api_key --type api_key --secret "<value>" --tags cursor,openai

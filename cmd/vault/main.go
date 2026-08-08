@@ -1,15 +1,19 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/cswink267/agent-vault/internal/client"
 	"github.com/cswink267/agent-vault/internal/vault"
+	"golang.org/x/term"
 )
 
 func main() {
@@ -364,9 +368,18 @@ func printSecret(sec vault.Secret, reveal bool) {
 }
 
 func readPassphrase() (string, error) {
-	var pass string
-	if _, err := fmt.Fscanln(os.Stdin, &pass); err != nil {
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		pass, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			return "", err
+		}
+		return string(pass), nil
+	}
+
+	pass, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
 		return "", err
 	}
-	return pass, nil
+	return strings.TrimRight(pass, "\r\n"), nil
 }

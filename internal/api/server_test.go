@@ -178,6 +178,16 @@ func TestUnlockLock(t *testing.T) {
 		t.Fatalf("unlock status %d body %s", resp.StatusCode, b)
 	}
 
+	postSecret(ts.URL, token, `{"name":"audited","type":"api_key","secret":"x","tags":["prod"]}`)
+	resp, err = doAuth(http.MethodGet, ts.URL+"/v1/search?q=audited", token, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("search status %d", resp.StatusCode)
+	}
+
 	resp, err = doAuth(http.MethodPost, ts.URL+"/v1/lock", token, "")
 	if err != nil {
 		t.Fatal(err)
@@ -199,6 +209,68 @@ func TestUnlockLock(t *testing.T) {
 	if health["sealed"] != true {
 		t.Fatalf("want sealed after lock")
 	}
+
+	resp, err = doAuth(http.MethodGet, ts.URL+"/v1/audit?limit=20", token, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("audit status %d", resp.StatusCode)
+	}
+	var audit []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&audit); err != nil {
+		t.Fatal(err)
+	}
+	assertAuditActions(t, audit, "unlock", "search", "lock")
+}
+
+func TestCreateSecretConflictDoesNotOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	v, res, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := api.New(v)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	token := res.Token
+	resp, err := doAuth(http.MethodPost, ts.URL+"/v1/secrets", token, `{"name":"same","type":"api_key","secret":"first"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("first post status %d body %s", resp.StatusCode, b)
+	}
+
+	resp, err = doAuth(http.MethodPost, ts.URL+"/v1/secrets", token, `{"name":"same","type":"api_key","secret":"second"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("second post status %d body %s", resp.StatusCode, b)
+	}
+
+	resp, err = doAuth(http.MethodGet, ts.URL+"/v1/secrets/same?reveal=1", token, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get reveal status %d", resp.StatusCode)
+	}
+	var secret map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&secret); err != nil {
+		t.Fatal(err)
+	}
+	if secret["secret"] != "first" {
+		t.Fatalf("secret overwritten after conflict: %v", secret["secret"])
+	}
 }
 
 func doAuth(method, url, token string, body string) (*http.Response, error) {
@@ -217,6 +289,21 @@ func doAuth(method, url, token string, body string) (*http.Response, error) {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	return http.DefaultClient.Do(req)
+}
+
+func assertAuditActions(t *testing.T, rows []map[string]interface{}, actions ...string) {
+	t.Helper()
+	seen := map[string]bool{}
+	for _, row := range rows {
+		if action, ok := row["action"].(string); ok {
+			seen[action] = true
+		}
+	}
+	for _, action := range actions {
+		if !seen[action] {
+			t.Fatalf("missing audit action %q in %#v", action, rows)
+		}
+	}
 }
 
 func postSecret(baseURL, token, body string) {

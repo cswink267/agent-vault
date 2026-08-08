@@ -51,8 +51,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Passphrase    string `json:"passphrase"`
-		UnsealKeyHex  string `json:"unseal_key_hex"`
+		Passphrase   string `json:"passphrase"`
+		UnsealKeyHex string `json:"unseal_key_hex"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
@@ -60,6 +60,7 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var err error
+	actor := actorFromContext(r.Context())
 	if body.UnsealKeyHex != "" {
 		keyBytes, decErr := hex.DecodeString(body.UnsealKeyHex)
 		if decErr != nil || len(keyBytes) != crypto.MasterKeySize {
@@ -68,15 +69,19 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		}
 		var master crypto.MasterKey
 		copy(master[:], keyBytes)
-		err = s.vault.UnlockWithKey(master)
+		err = s.vault.UnlockWithKey(master, actor)
 	} else if body.Passphrase != "" {
-		err = s.vault.UnlockWithPassphrase(body.Passphrase)
+		err = s.vault.UnlockWithPassphrase(body.Passphrase, actor)
 	} else {
 		writeError(w, http.StatusBadRequest, "passphrase or unseal_key_hex required")
 		return
 	}
 
 	if err != nil {
+		if errors.Is(err, vault.ErrInvalidMasterKey) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		writeError(w, http.StatusBadRequest, "unlock failed")
 		return
 	}
@@ -84,7 +89,10 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLock(w http.ResponseWriter, r *http.Request) {
-	s.vault.Lock()
+	if err := s.vault.LockWithAudit(actorFromContext(r.Context())); err != nil {
+		writeVaultError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -106,15 +114,7 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 	}
 
 	actor := actorFromContext(r.Context())
-	if _, err := s.vault.Get(actor, sec.Name, false); err == nil {
-		writeError(w, http.StatusConflict, "secret already exists")
-		return
-	} else if !errors.Is(err, store.ErrNotFound) {
-		writeVaultError(w, err)
-		return
-	}
-
-	out, err := s.vault.Put(actor, sec)
+	out, err := s.vault.Create(actor, sec)
 	if err != nil {
 		writeVaultError(w, err)
 		return
@@ -284,14 +284,14 @@ func decodeJSON(r *http.Request, v interface{}) error {
 
 func decodeSecret(r *http.Request) (vault.Secret, error) {
 	var body struct {
-		Name      string            `json:"name"`
-		Type      string            `json:"type"`
-		Secret    string            `json:"secret"`
-		Username  string            `json:"username"`
-		URL       string            `json:"url"`
-		Tags      []string          `json:"tags"`
-		Notes     string            `json:"notes"`
-		Metadata  map[string]string `json:"metadata"`
+		Name     string            `json:"name"`
+		Type     string            `json:"type"`
+		Secret   string            `json:"secret"`
+		Username string            `json:"username"`
+		URL      string            `json:"url"`
+		Tags     []string          `json:"tags"`
+		Notes    string            `json:"notes"`
+		Metadata map[string]string `json:"metadata"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		return vault.Secret{}, errors.New("invalid JSON")

@@ -1,7 +1,9 @@
 package vault
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,6 +19,12 @@ import (
 )
 
 var ErrSealed = errors.New("vault is sealed")
+var ErrInvalidMasterKey = errors.New("unseal key does not match this vault")
+
+const (
+	masterCheckMetaKey = "master_check"
+	masterCheckMessage = "agent-vault-ok"
+)
 
 var validTypes = map[string]bool{
 	"api_key": true,
@@ -98,6 +106,10 @@ func Init(dataDir, passphrase string) (*Vault, InitResult, error) {
 		st.Close()
 		return nil, InitResult{}, err
 	}
+	if err := st.SetMeta(masterCheckMetaKey, hex.EncodeToString(masterCheck(master))); err != nil {
+		st.Close()
+		return nil, InitResult{}, err
+	}
 	if err := st.SetMeta("initialized", "1"); err != nil {
 		st.Close()
 		return nil, InitResult{}, err
@@ -146,7 +158,7 @@ func (v *Vault) Sealed() bool {
 	return v.master == nil
 }
 
-func (v *Vault) UnlockWithPassphrase(passphrase string) error {
+func (v *Vault) UnlockWithPassphrase(passphrase string, actorLabel ...string) error {
 	saltHex, ok, err := v.store.GetMeta("salt")
 	if err != nil {
 		return err
@@ -179,14 +191,20 @@ func (v *Vault) UnlockWithPassphrase(passphrase string) error {
 	if err != nil {
 		return err
 	}
-	return v.UnlockWithKey(master)
+	return v.UnlockWithKey(master, actorLabel...)
 }
 
-func (v *Vault) UnlockWithKey(master crypto.MasterKey) error {
+func (v *Vault) UnlockWithKey(master crypto.MasterKey, actorLabel ...string) error {
+	if err := v.verifyMaster(master); err != nil {
+		return err
+	}
 	v.mu.Lock()
-	defer v.mu.Unlock()
 	m := master
 	v.master = &m
+	v.mu.Unlock()
+	if actor := optionalActor(actorLabel); actor != "" {
+		return v.store.AppendAudit(actor, "unlock", "")
+	}
 	return nil
 }
 
@@ -194,6 +212,11 @@ func (v *Vault) Lock() {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.master = nil
+}
+
+func (v *Vault) LockWithAudit(actorLabel string) error {
+	v.Lock()
+	return v.store.AppendAudit(actorLabel, "lock", "")
 }
 
 func (v *Vault) TryAutoUnseal(unsealKeyPath string) (bool, error) {
@@ -230,53 +253,11 @@ func (v *Vault) Put(actorLabel string, sec Secret) (Secret, error) {
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	secretBlob, err := crypto.Seal(master, []byte(sec.Secret))
-	if err != nil {
-		return Secret{}, err
-	}
-
-	var usernameNonce, usernameCT, usernameWrapped []byte
-	if sec.Username != "" {
-		userBlob, err := crypto.Seal(master, []byte(sec.Username))
-		if err != nil {
-			return Secret{}, err
-		}
-		usernameNonce = userBlob.Nonce
-		usernameCT = userBlob.Ciphertext
-		usernameWrapped = userBlob.WrappedDEK
-	}
-
-	tagsJSON, err := json.Marshal(sec.Tags)
-	if err != nil {
-		return Secret{}, err
-	}
-	if sec.Metadata == nil {
-		sec.Metadata = map[string]string{}
-	}
-	metadataJSON, err := json.Marshal(sec.Metadata)
-	if err != nil {
-		return Secret{}, err
-	}
-
 	existing, err := v.store.GetSecretByName(sec.Name)
 	if errors.Is(err, store.ErrNotFound) {
-		row := store.SecretRow{
-			ID:                 newID(),
-			Name:               sec.Name,
-			Type:               sec.Type,
-			UsernameNonce:      usernameNonce,
-			UsernameCT:         usernameCT,
-			UsernameWrappedDEK: usernameWrapped,
-			SecretNonce:        secretBlob.Nonce,
-			SecretCT:           secretBlob.Ciphertext,
-			SecretWrappedDEK:   secretBlob.WrappedDEK,
-			URL:                sec.URL,
-			TagsJSON:           string(tagsJSON),
-			Notes:              sec.Notes,
-			MetadataJSON:       string(metadataJSON),
-			CreatedAt:          now,
-			UpdatedAt:          now,
-			Version:            1,
+		row, err := buildSecretRow(master, sec, newID(), now, now, 1)
+		if err != nil {
+			return Secret{}, err
 		}
 		if err := v.store.CreateSecret(row); err != nil {
 			return Secret{}, err
@@ -290,25 +271,34 @@ func (v *Vault) Put(actorLabel string, sec Secret) (Secret, error) {
 		return Secret{}, err
 	}
 
-	row := store.SecretRow{
-		ID:                 existing.ID,
-		Name:               sec.Name,
-		Type:               sec.Type,
-		UsernameNonce:      usernameNonce,
-		UsernameCT:         usernameCT,
-		UsernameWrappedDEK: usernameWrapped,
-		SecretNonce:        secretBlob.Nonce,
-		SecretCT:           secretBlob.Ciphertext,
-		SecretWrappedDEK:   secretBlob.WrappedDEK,
-		URL:                sec.URL,
-		TagsJSON:           string(tagsJSON),
-		Notes:              sec.Notes,
-		MetadataJSON:       string(metadataJSON),
-		CreatedAt:          existing.CreatedAt,
-		UpdatedAt:          now,
-		Version:            existing.Version + 1,
+	row, err := buildSecretRow(master, sec, existing.ID, existing.CreatedAt, now, existing.Version+1)
+	if err != nil {
+		return Secret{}, err
 	}
 	if err := v.store.UpdateSecret(row); err != nil {
+		return Secret{}, err
+	}
+	if err := v.store.AppendAudit(actorLabel, "set", sec.Name); err != nil {
+		return Secret{}, err
+	}
+	return rowToSecret(row, sec.Secret, sec.Username), nil
+}
+
+func (v *Vault) Create(actorLabel string, sec Secret) (Secret, error) {
+	if err := validateSecret(sec); err != nil {
+		return Secret{}, err
+	}
+
+	master, err := v.copyMaster()
+	if err != nil {
+		return Secret{}, err
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	row, err := buildSecretRow(master, sec, newID(), now, now, 1)
+	if err != nil {
+		return Secret{}, err
+	}
+	if err := v.store.CreateSecret(row); err != nil {
 		return Secret{}, err
 	}
 	if err := v.store.AppendAudit(actorLabel, "set", sec.Name); err != nil {
@@ -404,7 +394,7 @@ func (v *Vault) Search(actorLabel, q, tag, typ string) ([]Secret, error) {
 		for i, row := range rows {
 			out[i] = rowToSecret(row, "", "")
 		}
-		return nil
+		return v.store.AppendAudit(actorLabel, "search", "")
 	})
 	if err != nil {
 		return nil, err
@@ -495,6 +485,86 @@ func rowToSecret(row store.SecretRow, secret, username string) Secret {
 		UpdatedAt: row.UpdatedAt,
 		Version:   row.Version,
 	}
+}
+
+func (v *Vault) verifyMaster(master crypto.MasterKey) error {
+	checkHex, ok, err := v.store.GetMeta(masterCheckMetaKey)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("vault master check missing")
+	}
+	check, err := hex.DecodeString(checkHex)
+	if err != nil {
+		return fmt.Errorf("vault master check invalid: %w", err)
+	}
+	if !hmac.Equal(masterCheck(master), check) {
+		return ErrInvalidMasterKey
+	}
+	return nil
+}
+
+func masterCheck(master crypto.MasterKey) []byte {
+	mac := hmac.New(sha256.New, master[:])
+	_, _ = mac.Write([]byte(masterCheckMessage))
+	return mac.Sum(nil)
+}
+
+func optionalActor(actorLabel []string) string {
+	if len(actorLabel) == 0 {
+		return ""
+	}
+	return actorLabel[0]
+}
+
+func buildSecretRow(master crypto.MasterKey, sec Secret, id, createdAt, updatedAt string, version int) (store.SecretRow, error) {
+	secretBlob, err := crypto.Seal(master, []byte(sec.Secret))
+	if err != nil {
+		return store.SecretRow{}, err
+	}
+
+	var usernameNonce, usernameCT, usernameWrapped []byte
+	if sec.Username != "" {
+		userBlob, err := crypto.Seal(master, []byte(sec.Username))
+		if err != nil {
+			return store.SecretRow{}, err
+		}
+		usernameNonce = userBlob.Nonce
+		usernameCT = userBlob.Ciphertext
+		usernameWrapped = userBlob.WrappedDEK
+	}
+
+	tagsJSON, err := json.Marshal(sec.Tags)
+	if err != nil {
+		return store.SecretRow{}, err
+	}
+	if sec.Metadata == nil {
+		sec.Metadata = map[string]string{}
+	}
+	metadataJSON, err := json.Marshal(sec.Metadata)
+	if err != nil {
+		return store.SecretRow{}, err
+	}
+
+	return store.SecretRow{
+		ID:                 id,
+		Name:               sec.Name,
+		Type:               sec.Type,
+		UsernameNonce:      usernameNonce,
+		UsernameCT:         usernameCT,
+		UsernameWrappedDEK: usernameWrapped,
+		SecretNonce:        secretBlob.Nonce,
+		SecretCT:           secretBlob.Ciphertext,
+		SecretWrappedDEK:   secretBlob.WrappedDEK,
+		URL:                sec.URL,
+		TagsJSON:           string(tagsJSON),
+		Notes:              sec.Notes,
+		MetadataJSON:       string(metadataJSON),
+		CreatedAt:          createdAt,
+		UpdatedAt:          updatedAt,
+		Version:            version,
+	}, nil
 }
 
 func newID() string {

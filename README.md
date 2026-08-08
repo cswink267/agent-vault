@@ -50,6 +50,14 @@ curl -s http://localhost:8200/health
 
 Humans can manage secrets in a browser at **http://beast:8200/ui** (or `http://localhost:8200/ui` locally). Log in with the vault **passphrase** (same value used at init or unlock). The UI uses a session cookie and CSRF token for mutating requests; it does not replace bearer auth on `/v1`.
 
+To rotate the passphrase after init, use **Change passphrase** in the Admin UI, or:
+
+```bash
+vault change-passphrase --old 'current' --new 'replacement'
+```
+
+(`POST /v1/change-passphrase` with bearer auth). This rewraps the master key only — `unseal.key` and secrets are unchanged. **All bearer tokens are revoked** and a new root token is returned once (also written to `root.token` on the server). Update `AGENT_VAULT_TOKEN` / `~/.config/agent-vault` and remint agent tokens. After rotating on beast, update `~/.config/agent-vault/passphrase` so local notes stay accurate.
+
 **Security:** Admin UI is plain HTTP like the REST API — use only on the private LAN until the HTTPS slice lands. Do not expose port 8200 to the public internet.
 
 Compose publishes host **8200** → container `8080` (beast `:8080` is already taken by filebrowser). Inside the container the server still binds `0.0.0.0:$PORT` (default `8080`). All vault state (`vault.db`, `unseal.key`, `root.token`) lives only on the `/data` volume.
@@ -74,7 +82,11 @@ vault search openai
 vault get openai.api_key
 vault list
 vault delete openai.api_key
+vault change-passphrase --old '<current>' --new '<replacement>'
+vault rotate-master --passphrase '<current>'
 ```
+
+`rotate-master` generates a new master key, rewraps every secret DEK, rewrites `unseal.key`, and revokes bearer tokens (returns a new root token once). Passphrase stays the same unless you also run `change-passphrase`.
 
 ## MCP & agent skills
 
@@ -90,9 +102,9 @@ Set `AGENT_VAULT_URL` and `AGENT_VAULT_TOKEN` in the MCP server env. Ensure `vau
 
 ## Security notes
 
-- **Unseal key** — `/data/unseal.key` is written with mode `0600` at init. Restrict volume access on the host; anyone with read access to this file can unseal the vault.
+- **Unseal key** — `/data/unseal.key` is written with mode `0600` at init and rewritten by `rotate-master`. Restrict volume access on the host; anyone with read access to this file can unseal the vault.
 - **Root token** — Treat like a password. Save from init logs or `/data/root.token`; mint scoped tokens via `POST /v1/tokens` for agents.
-- **Passphrase** — Required only for init or manual unlock (`POST /v1/unlock`). Do not commit it to git or bake it into images.
+- **Passphrase** — Required for init, Admin UI login, and manual unlock (`POST /v1/unlock`). Rotate with `vault change-passphrase` or the Admin UI form (does not invalidate `unseal.key`; **does revoke all bearer tokens** and mints a new root token). Do not commit it to git or bake it into images.
 - **Network** — Phase 1 serves plain HTTP on the private network. Do not expose host port 8200 (or the container port) to the public internet without TLS.
 
 ## HTTP API
@@ -105,6 +117,8 @@ Search endpoint: `GET /v1/search` (query params `q`, `tag`, `type`). This path r
 | `GET /ui/*` | session cookie | Admin UI (humans; passphrase login) |
 | `POST /v1/unlock` | yes | Unlock with passphrase or unseal key |
 | `POST /v1/lock` | yes | Seal vault |
+| `POST /v1/change-passphrase` | yes | Rewrap master under a new passphrase |
+| `POST /v1/rotate-master` | yes | New master key; rewrap secrets + `unseal.key` |
 | `GET/POST /v1/secrets` | yes | List / create secrets |
 | `GET/PUT/DELETE /v1/secrets/{name}` | yes | Read / update / delete |
 | `GET /v1/search` | yes | Search by query, tag, type |

@@ -146,6 +146,99 @@ var AV = (function () {
         });
       });
     }
+
+    var cpForm = document.getElementById('change-passphrase-form');
+    if (cpForm) {
+      cpForm.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var oldEl = document.getElementById('cp-old');
+        var newEl = document.getElementById('cp-new');
+        var confirmEl = document.getElementById('cp-confirm');
+        var statusEl = document.getElementById('cp-status');
+        var oldPass = oldEl ? oldEl.value : '';
+        var newPass = newEl ? newEl.value : '';
+        var confirmPass = confirmEl ? confirmEl.value : '';
+        if (!oldPass || !newPass) {
+          if (statusEl) statusEl.textContent = 'Both passphrases are required.';
+          return;
+        }
+        if (newPass !== confirmPass) {
+          if (statusEl) statusEl.textContent = 'New passphrase and confirmation do not match.';
+          return;
+        }
+        if (statusEl) statusEl.textContent = 'Updating…';
+        apiFetch('/ui/api/change-passphrase', {
+          method: 'POST',
+          body: JSON.stringify({ old_passphrase: oldPass, new_passphrase: newPass })
+        }).then(function (resp) {
+          return resp.json().then(function (data) {
+            return { ok: resp.ok, data: data };
+          });
+        }).then(function (result) {
+          if (result.ok) {
+            if (oldEl) oldEl.value = '';
+            if (newEl) newEl.value = '';
+            if (confirmEl) confirmEl.value = '';
+            var msg = 'Passphrase updated. All agent tokens revoked.';
+            if (result.data && typeof result.data.token === 'string' && result.data.token) {
+              msg += ' New root token (save now): ' + result.data.token;
+            }
+            if (statusEl) statusEl.textContent = msg;
+            return;
+          }
+          var errMsg = 'Update failed';
+          if (result.data && typeof result.data.error === 'string') {
+            errMsg = result.data.error;
+          }
+          if (statusEl) statusEl.textContent = errMsg;
+        }).catch(function () {
+          if (statusEl) statusEl.textContent = 'Update failed';
+        });
+      });
+    }
+
+    var rmForm = document.getElementById('rotate-master-form');
+    if (rmForm) {
+      rmForm.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var passEl = document.getElementById('rm-pass');
+        var statusEl = document.getElementById('rm-status');
+        var pass = passEl ? passEl.value : '';
+        if (!pass) {
+          if (statusEl) statusEl.textContent = 'Passphrase is required.';
+          return;
+        }
+        if (!window.confirm('Rotate the master key? This rewrites unseal.key and revokes all agent tokens.')) {
+          return;
+        }
+        if (statusEl) statusEl.textContent = 'Rotating…';
+        apiFetch('/ui/api/rotate-master', {
+          method: 'POST',
+          body: JSON.stringify({ passphrase: pass })
+        }).then(function (resp) {
+          return resp.json().then(function (data) {
+            return { ok: resp.ok, data: data };
+          });
+        }).then(function (result) {
+          if (result.ok) {
+            if (passEl) passEl.value = '';
+            var msg = 'Master key rotated. All agent tokens revoked.';
+            if (result.data && typeof result.data.token === 'string' && result.data.token) {
+              msg += ' New root token (save now): ' + result.data.token;
+            }
+            if (statusEl) statusEl.textContent = msg;
+            return;
+          }
+          var errMsg = 'Rotate failed';
+          if (result.data && typeof result.data.error === 'string') {
+            errMsg = result.data.error;
+          }
+          if (statusEl) statusEl.textContent = errMsg;
+        }).catch(function () {
+          if (statusEl) statusEl.textContent = 'Rotate failed';
+        });
+      });
+    }
   }
 
   function initLoginPage() {

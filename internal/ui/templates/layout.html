@@ -20,4 +20,24 @@
 <div id="sealed-banner" class="sealed-banner" role="alert" hidden>
   Vault is sealed. Unlock to manage secrets.
 </div>
+<details class="passphrase-panel">
+  <summary>Change passphrase</summary>
+  <form id="change-passphrase-form" class="passphrase-form">
+    <label for="cp-old">Current passphrase</label>
+    <input type="password" id="cp-old" name="old_passphrase" autocomplete="current-password" required>
+    <label for="cp-new">New passphrase</label>
+    <input type="password" id="cp-new" name="new_passphrase" autocomplete="new-password" required>
+    <label for="cp-confirm">Confirm new passphrase</label>
+    <input type="password" id="cp-confirm" name="confirm_passphrase" autocomplete="new-password" required>
+    <p id="cp-status" class="text-muted" aria-live="polite"></p>
+    <button type="submit" class="btn btn-primary">Update passphrase</button>
+  </form>
+  <form id="rotate-master-form" class="passphrase-form">
+    <p class="text-muted">Rotate the encryption master key. Rewrites unseal.key and revokes all agent tokens.</p>
+    <label for="rm-pass">Confirm passphrase</label>
+    <input type="password" id="rm-pass" name="passphrase" autocomplete="current-password" required>
+    <p id="rm-status" class="text-muted" aria-live="polite"></p>
+    <button type="submit" class="btn btn-secondary">Rotate master key</button>
+  </form>
+</details>
 {{end}}

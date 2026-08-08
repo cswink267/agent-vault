@@ -7,7 +7,7 @@ description: Store and retrieve shared credentials via agent-vault. Use when the
 
 Use agent-vault to share encrypted credentials across Hermes, Cursor, Claude Code, and other agents on beast. Secrets are stored by stable name (e.g. `openai.api_key`) and retrieved on demand.
 
-Humans may use the Admin UI at `http://beast:8200/ui` (passphrase login). Agents should use MCP or CLI with bearer tokens — not the browser UI.
+Humans may use the Admin UI at `http://beast:8200/ui` (passphrase login; change passphrase / rotate master in the UI or via `vault change-passphrase` / `vault rotate-master`). Agents should use MCP or CLI with bearer tokens — not the browser UI.
 
 ## Auto-use rules
 

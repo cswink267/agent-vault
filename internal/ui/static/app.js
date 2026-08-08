@@ -781,6 +781,37 @@ var AV = (function () {
     });
   }
 
+  function boot() {
+    if (document.getElementById('login-form')) {
+      initLoginPage();
+      return;
+    }
+    if (document.getElementById('btn-lock') || document.getElementById('btn-logout')) {
+      initAppChrome();
+    }
+    if (document.getElementById('secrets-body')) {
+      initListPage();
+    }
+    if (document.getElementById('detail-content')) {
+      initDetailPage();
+    }
+    if (document.getElementById('new-form')) {
+      initNewPage();
+    }
+    if (document.getElementById('audit-body')) {
+      initAuditPage();
+    }
+    if (document.getElementById('settings-form')) {
+      initSettingsPage();
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+
   return {
     initAppChrome: initAppChrome,
     initLoginPage: initLoginPage,

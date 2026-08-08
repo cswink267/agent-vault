@@ -1,58 +1,63 @@
 # Concepts
 
-This page explains how Agent Vault works under the hood—enough to operate it safely without reading the Go source.
+How Agent Vault works—enough to operate it safely without reading the Go source.
 
 ## What it is
 
-Agent Vault stores **named secrets** (API keys, logins, tokens, SSH keys, notes) in an encrypted SQLite database. Clients authenticate with a **bearer token**. Humans can also use a browser **Admin UI** with the vault passphrase.
+Agent Vault stores **named secrets** (API keys, logins, tokens, SSH keys, notes) in an encrypted SQLite database.
 
-Typical layout:
+- **Humans** open the Admin UI with the vault **passphrase**, or use the CLI with a bearer token.
+- **Agents** use a bearer token via MCP, CLI, or REST. They should not use the browser UI.
 
 ```text
-You (browser)  ──passphrase──►  /ui
-Agents / CLI   ──Bearer token─►  /v1
-MCP wrapper    ──same token───►  /v1  (via vault-mcp)
+You (browser)  ── passphrase ──►  /ui
+Agents / CLI   ── Bearer token ►  /v1
+MCP (vault-mcp) ── same token ─►  /v1
 ```
 
 ## Encryption model
 
 1. At init, the vault generates a random **master key** (256-bit).
-2. Every secret value is encrypted with AES-256-GCM under a per-secret data key; that key is wrapped under the master key.
-3. The master key itself is wrapped under a key derived from your **passphrase** (Argon2id).
+2. Each secret value is encrypted with AES-256-GCM under a per-secret data key; that data key is wrapped under the master key.
+3. The master key is wrapped under a key derived from your **passphrase** (Argon2id).
 4. The same master key is also written (hex) to **`unseal.key`** on disk so the server can auto-unseal after reboot without typing the passphrase.
 
-So:
+| Material | What it does | Treat it like |
+|----------|--------------|---------------|
+| Passphrase | UI login, unlock, change-passphrase | Your vault password |
+| `unseal.key` | Auto-unseal + disaster recovery | The master key itself |
+| Bearer tokens (`avt_…`) | API / CLI / MCP auth | API keys (shown once; hashed at rest) |
 
-| Material | Role |
-|----------|------|
-| Passphrase | Human unlock / UI login / change-passphrase |
-| `unseal.key` | Auto-unseal and disaster recovery (treat as the master key) |
-| Bearer tokens | API/CLI/MCP auth (hashed at rest; plaintext shown once) |
+**Change passphrase** rewraps the master key under the new passphrase. It does **not** rewrite `unseal.key` or re-encrypt secrets. It **does** revoke all bearer tokens and mint a new root admin token (shown once).
 
-Changing the passphrase **rewraps** the master key; it does **not** rewrite `unseal.key` or re-encrypt secrets. Rotating the master key (`rotate-master`) does both: new master, rewrap all secrets, rewrite `unseal.key`, revoke all tokens.
+**Rotate master** creates a new master key, rewraps all secrets, rewrites `unseal.key`, and revokes all tokens. Use this if you believe the master key or `unseal.key` was exposed.
 
 ## Sealed vs unsealed
 
-- **Unsealed** — master key in memory; secret create/read/update/delete and export work.
-- **Sealed** — master key wiped from memory; most secret operations fail until unlock or auto-unseal.
+| State | Meaning |
+|-------|---------|
+| **Unsealed** | Master key in memory. You can create, read, update, delete, and export secrets. |
+| **Sealed** | Master key wiped from memory. Secret operations fail until unlock (or auto-unseal). |
 
-On Docker, if `unseal.key` is present, the server usually auto-unseals at start. Operators can still `vault lock` / `vault unlock`.
+On Docker, if `unseal.key` is present, the server usually auto-unseals at start. You can still `vault lock` / `vault unlock` (or use Lock / Unlock in the UI).
 
 ## Tokens and scopes
 
-Tokens look like `avt_<hex>`. Only the SHA-256 hash is stored.
+Tokens look like `avt_<hex>`. Only a SHA-256 hash is stored in the database. The plaintext is shown **once** when created.
 
 | Scope | Can do |
 |-------|--------|
 | **admin** | Everything: secrets, tokens, backups, lock, passphrase/master rotate, audit |
-| **agent** | Secrets only: list, get (reveal), create/update, search, delete. No backups, no token minting, no rotate |
+| **agent** | Secrets only: list, get (reveal), create/update, search, delete |
+
+Rules that matter in practice:
 
 - The init **root** token is `admin`.
-- New tokens default to **agent** (`vault token create --label …`).
-- You cannot revoke the **last** admin token.
-- Change-passphrase and rotate-master **revoke all tokens** and mint a fresh root admin token once.
+- `vault token create` defaults to **agent** unless you pass `--scope admin`.
+- You cannot revoke the **last** admin token (the API returns `409`).
+- Change-passphrase and rotate-master **revoke every token** and return a fresh root admin token once.
 
-Give each agent its own labeled agent-scoped token. Prefer that over sharing the root token.
+Give each agent its own labeled **agent**-scoped token. Do not share the root token with routine automation.
 
 ## Secret names and types
 
@@ -60,24 +65,24 @@ Give each agent its own labeled agent-scoped token. Prefer that over sharing the
 - **Types**: `api_key` | `login` | `ssh_key` | `token` | `note`
 - Optional fields: `username`, `url`, `tags`, `notes`, `metadata`
 
-Listing and searching return **metadata** without the secret value. Revealing requires an explicit get (`vault get` or `GET /v1/secrets/{name}?reveal=1`).
+List and search return **metadata only** (no secret value). Revealing requires an explicit get (`vault get` or `GET /v1/secrets/{name}?reveal=1`).
 
-## Three ways to talk to the vault
+## Ways to talk to the vault
 
 | Interface | Best for | Auth |
 |-----------|----------|------|
-| **Admin UI** (`/ui`) | Humans: browse, Settings, downloads | Passphrase → session cookie + CSRF |
-| **CLI** (`vault`) | Scripts, SSH sessions, agents without MCP | `AGENT_VAULT_TOKEN` |
-| **REST** (`/v1`) | Any language or agent that can HTTP | `Authorization: Bearer …` |
+| **Admin UI** (`/ui`) | Humans: browse secrets, Settings, downloads | Passphrase → session cookie + CSRF |
+| **CLI** (`vault`) | Scripts, SSH sessions, agents without MCP | `AGENT_VAULT_URL` + `AGENT_VAULT_TOKEN` |
+| **REST** (`/v1`) | Any language or custom agent | `Authorization: Bearer …` |
 | **MCP** (`vault-mcp`) | Agents that speak Model Context Protocol | Same env as CLI; tools wrap REST |
 
 MCP does not invent a new security model—it is a thin tool layer over `/v1`.
 
 ## Network shapes
 
-1. **Private LAN** — `http://beast:8200` (or localhost). Fine for trusted networks.
-2. **Public HTTPS** — optional Compose `https` profile (Caddy + Let’s Encrypt). Configure hostname in Settings; Cloudflare DNS must be **grey cloud** (DNS only) for HTTP-01.
-3. **IP allowlist** — optional; when set, non-listed clients get `403` on `/ui` and `/v1`. `/health` always stays open.
+1. **Private network** — `http://localhost:8200` or `http://<hostname>:8200`. Fine on a trusted network.
+2. **Public HTTPS** — optional Compose `https` profile (Caddy + Let’s Encrypt). Set the hostname in Settings. If you use Cloudflare, DNS must be **grey cloud** (DNS only) for HTTP-01 certificate issuance.
+3. **IP allowlist** — **off by default**. With an empty allowlist, every client IP that can reach the port is allowed. You must enter IPs/CIDRs in Settings yourself if you want to restrict access. When set, non-listed clients get `403` on `/ui` and `/v1`. `/health` always stays open.
 
 ## Mental model for agents
 

@@ -11,12 +11,12 @@ Start here: **[docs/README.md](docs/README.md)**
 | Guide | Contents |
 |-------|----------|
 | [Concepts](docs/concepts.md) | Encryption, seal/unseal, tokens & scopes |
-| [Install & ops](docs/install-and-ops.md) | Docker, first boot, HTTPS, rotation |
-| [Admin UI](docs/admin-ui.md) | Browser operator guide |
+| [Install & ops](docs/install-and-ops.md) | Docker, first boot, HTTPS, allowlist, upgrades |
+| [Admin UI](docs/admin-ui.md) | Browser operator guide (`/ui`, `/ui/docs`) |
 | [CLI](docs/cli.md) | Full `vault` reference |
 | [HTTP API](docs/api.md) | Every `/v1` route with curl |
 | [Agents](docs/agents.md) | MCP / CLI / REST for any agent |
-| [Security & backup](docs/security-and-backup.md) | Snapshots, exports, hardening |
+| [Security & backup](docs/security-and-backup.md) | Snapshots vs exports, hardening |
 
 **Agent skill (universal):** [`skills/SKILL.md`](skills/SKILL.md)  
 **MCP stdio example:** [`skills/mcp.stdio.json.example`](skills/mcp.stdio.json.example)
@@ -33,7 +33,7 @@ docker compose -f deploy/docker-compose.yml exec agent-vault cat /data/root.toke
 ```
 
 ```bash
-export AGENT_VAULT_URL=http://localhost:8200   # or http://beast:8200
+export AGENT_VAULT_URL=http://localhost:8200   # or http://<hostname>:8200
 export AGENT_VAULT_TOKEN=<root-token>
 
 # Prefer a dedicated agent token:

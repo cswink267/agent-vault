@@ -3,7 +3,7 @@
     "agent-vault": {
       "command": "vault-mcp",
       "env": {
-        "AGENT_VAULT_URL": "http://beast:8200",
+        "AGENT_VAULT_URL": "http://localhost:8200",
         "AGENT_VAULT_TOKEN": "<agent-scoped-token>"
       }
     }

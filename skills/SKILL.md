@@ -25,7 +25,7 @@ Follow automatically—do not wait for the user to ask:
 
 | Variable | Purpose |
 |----------|---------|
-| `AGENT_VAULT_URL` | API base. LAN example: `http://beast:8200`. Cloud: `https://<public_hostname>` when HTTPS is enabled. |
+| `AGENT_VAULT_URL` | API base. Example: `http://localhost:8200` or `http://<hostname>:8200`. Cloud: `https://<public_hostname>` when HTTPS is enabled. |
 | `AGENT_VAULT_TOKEN` | Bearer token (`avt_…`), preferably scope `agent` |
 
 ## MCP tools
@@ -53,7 +53,7 @@ Setup: run `vault-mcp` as a stdio MCP server with the env above. Generic example
 ## CLI fallback
 
 ```bash
-export AGENT_VAULT_URL=http://beast:8200
+export AGENT_VAULT_URL=http://localhost:8200
 export AGENT_VAULT_TOKEN=<token>
 
 vault set --name openai.api_key --type api_key --secret "<value>" --tags agents,openai

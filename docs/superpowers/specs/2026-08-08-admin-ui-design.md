@@ -3,7 +3,7 @@
 **Date:** 2026-08-08  
 **Status:** Ready for user review  
 **Repo:** `agent-vault`  
-**Depends on:** Phase 1 (verified on beast; host port **8200**)
+**Depends on:** Phase 1 (verified on the host; host port **8200**)
 
 ## Purpose
 
@@ -15,7 +15,7 @@ Ship an embedded Admin UI so the single vault owner can manage structured creden
 2. Reveal-on-demand and copy; never show secrets in lists or URLs.
 3. Vault lock/unlock and recent audit view in the UI.
 4. HttpOnly session auth via vault passphrase (no long-lived API token in JavaScript).
-5. Same single Docker image and Compose service; UI at `http://beast:8200/ui`.
+5. Same single Docker image and Compose service; UI at `http://localhost:8200/ui`.
 
 ## Non-goals (this slice)
 
@@ -28,7 +28,7 @@ Ship an embedded Admin UI so the single vault owner can manage structured creden
 
 ## Trust model
 
-Unchanged from Phase 1: single user on beast. The UI is an alternate front door to the same vault. Session proves knowledge of the vault passphrase. Bearer tokens remain for agents.
+Unchanged from Phase 1: single user on the host. The UI is an alternate front door to the same vault. Session proves knowledge of the vault passphrase. Bearer tokens remain for agents.
 
 ## Architecture
 
@@ -134,7 +134,7 @@ Exact file split is an implementation detail; keep UI package focused and separa
 ## Deploy impact
 
 - No Compose service changes required for UI itself (same image).
-- README: document `http://beast:8200/ui` and passphrase login.
+- README: document `http://localhost:8200/ui` and passphrase login.
 - Skills: optional one-line note that humans may use the Admin UI; agents continue MCP/CLI.
 
 ## Phase 2 sequencing (after this slice)
@@ -152,7 +152,7 @@ Exact file split is an implementation detail; keep UI package focused and separa
 2. Reveal and copy work; lists never show secret material.
 3. Lock/unlock and audit work from the UI.
 4. CLI/MCP/`/v1` behavior unchanged on host port 8200.
-5. Single Docker image deploy on beast continues to work.
+5. Single Docker image deploy on the host continues to work.
 6. Automated tests cover session auth and UI API critical paths.
 
 ## Resolved decisions

@@ -6,7 +6,7 @@
 
 ## Purpose
 
-Build a from-scratch, single-user encrypted vault that Cursor, Claude Code, Hermes, and other applications can share. When one agent stores a private key or login, the others can find and use it by the same name. Deployed on **beast** as a Docker container. No third-party password managers (e.g. Vaultwarden).
+Build a from-scratch, single-user encrypted vault that Cursor, Claude Code, Hermes, and other applications can share. When one agent stores a private key or login, the others can find and use it by the same name. Deployed on **your server** as a Docker container. No third-party password managers (e.g. Vaultwarden).
 
 ## Goals
 
@@ -14,7 +14,7 @@ Build a from-scratch, single-user encrypted vault that Cursor, Claude Code, Herm
 2. Installable skills (and MCP/CLI) so agents automatically use the vault for private data.
 3. Strong encryption at rest with seal/unseal and auto-unseal on a trusted host.
 4. Hybrid reachability: private network by default; optional HTTPS for cloud agents (Phase 2).
-5. Simple one-container deploy suitable for beast.
+5. Simple one-container deploy suitable for the host.
 
 ## Non-goals (v1)
 
@@ -26,10 +26,10 @@ Build a from-scratch, single-user encrypted vault that Cursor, Claude Code, Herm
 
 ## Trust model
 
-- **Single user on beast** — one human owner; all agents share one vault.
+- **Single-user host** — one human owner; all agents share one vault.
 - Agent runtimes authenticate with API tokens (full access in v1).
 - Tokens may be one shared token or labeled per runtime (`cursor`, `claude`, `hermes`).
-- Host compromise of beast + unseal key material can reveal secrets; mitigate with volume permissions, optional seal when unused, and Phase 2 HTTPS hardening.
+- Host compromise + unseal key material can reveal secrets; mitigate with volume permissions, optional seal when unused, and Phase 2 HTTPS hardening.
 
 ## Architecture
 
@@ -141,7 +141,7 @@ Config via env: `AGENT_VAULT_URL`, `AGENT_VAULT_TOKEN` (and optional config file
 | `vault_set` | create/update |
 | `vault_delete` | delete |
 
-MCP process reads the same URL/token env vars. Runs in the agent environment; talks to the beast-hosted API.
+MCP process reads the same URL/token env vars. Runs in the agent environment; talks to the host API.
 
 ## Agent skills (auto-use)
 
@@ -154,7 +154,7 @@ Ship skill packs under `skills/{cursor,claude,hermes}/`:
 
 Cursor also gets an MCP config fragment; Claude Code and Hermes get skill + CLI setup notes.
 
-## Docker deploy (beast, v1)
+## Docker deploy (host, v1)
 
 - `Dockerfile` multi-stage Go build → minimal runtime image.
 - `deploy/docker-compose.yml`: one service, named volume `vault-data`, env for port, data dir, unseal key path.
@@ -166,7 +166,7 @@ Cursor also gets an MCP config fragment; Claude Code and Hermes get skill + CLI 
 
 | Mode | When |
 |------|------|
-| Private (default) | Agents on beast, LAN, or Tailscale to vault port |
+| Private (default) | Agents on the host, LAN, or Tailscale to vault port |
 | HTTPS (Phase 2) | Cloud Cursor/Claude agents; Caddy/nginx profile + TLS |
 
 ## Testing strategy
@@ -208,7 +208,7 @@ README.md
 
 ## Success criteria (Phase 1)
 
-1. `docker compose up` on beast yields a healthy vault.
+1. `docker compose up` on the host yields a healthy vault.
 2. CLI can init, set, get, search a secret.
 3. MCP tools perform the same operations against that server.
 4. A secret written via Cursor-oriented flow is readable via Claude/Hermes CLI or MCP using the same name.

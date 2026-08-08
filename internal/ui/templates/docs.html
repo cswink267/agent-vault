@@ -1,0 +1,43 @@
+{{define "docs"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}} - Docs - Agent Vault</title>
+  {{template "head" .}}
+  <link rel="stylesheet" href="/ui/static/app.css">
+</head>
+<body>
+  {{template "nav" .}}
+  <main class="container container-docs">
+    <div class="page-header">
+      <h1>Documentation</h1>
+      <p class="text-muted">Operator guides shipped with this vault. Same content as the repo <code>docs/</code> folder.</p>
+    </div>
+    <div class="docs-layout">
+      <aside class="docs-toc" aria-label="Documentation guides">
+        <h2 class="docs-toc-title">Guides</h2>
+        <nav>
+          <ul class="docs-toc-list">
+            {{range .Guides}}
+            <li>
+              {{if eq $.Slug .Slug}}
+              <a class="docs-toc-link is-active" href="/ui/docs{{if .Slug}}/{{.Slug}}{{end}}" aria-current="page">{{.Title}}</a>
+              {{else}}
+              <a class="docs-toc-link" href="/ui/docs{{if .Slug}}/{{.Slug}}{{end}}">{{.Title}}</a>
+              {{end}}
+            </li>
+            {{end}}
+          </ul>
+        </nav>
+      </aside>
+      <article class="docs-prose">
+        {{.HTML}}
+      </article>
+    </div>
+  </main>
+  <script src="/ui/static/app.js"></script>
+</body>
+</html>
+{{end}}

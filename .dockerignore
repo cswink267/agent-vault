@@ -5,5 +5,8 @@ bin/
 vault-server
 vault
 vault-mcp
-*.md
-docs/
+# Keep repo-root markdown out of the image; docs/*.md are embedded for /ui/docs.
+/*.md
+docs/superpowers/
+.agents/
+skills-lock.json

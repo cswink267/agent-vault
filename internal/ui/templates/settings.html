@@ -17,7 +17,7 @@
 
     <section class="settings-section" id="network-section">
       <h2>Network &amp; HTTPS</h2>
-      <p class="text-muted">Configure a public hostname for HTTPS via Caddy. Private LAN access on port 8200 remains available.</p>
+      <p class="text-muted">Optional public HTTPS via Caddy. Leave hostname blank and HTTPS unchecked if you only need LAN access on port 8200. Private LAN access remains available either way.</p>
 
       <form id="settings-form" class="form-card settings-form">
         <label for="public-hostname">Public hostname</label>
@@ -29,8 +29,8 @@
         </label>
 
         <label for="ip-allowlist">IP allowlist (optional)</label>
-        <textarea id="ip-allowlist" name="ip_allowlist" rows="3" placeholder="127.0.0.1&#10;10.0.0.0/8" autocomplete="off"></textarea>
-        <p class="text-muted">Comma or newline separated IPs/CIDRs. Empty allows all. When set, blocks other clients from /ui and /v1 (/health stays open). Behind Caddy, set <code>AGENT_VAULT_TRUST_PROXY=1</code>.</p>
+        <textarea id="ip-allowlist" name="ip_allowlist" rows="3" placeholder="192.168.0.0/16&#10;10.0.0.0/8" autocomplete="off"></textarea>
+        <p class="text-muted">Leave empty to allow all IPs (the default). Only fill this in if you want to restrict access—Agent Vault will not set a list for you. Use comma or newline separated IPs/CIDRs. When set, other clients get blocked on /ui and /v1 (/health stays open). In Docker, prefer your LAN CIDR over <code>127.0.0.1</code> alone. Behind Caddy, set <code>AGENT_VAULT_TRUST_PROXY=1</code>.</p>
 
         <p id="settings-status" class="form-message" hidden></p>
         <button type="submit" class="btn btn-primary">Save settings</button>
@@ -65,9 +65,9 @@
       <details class="form-card cloudflare-checklist" id="cloudflare-checklist">
         <summary>Cloudflare DNS setup (grey cloud)</summary>
         <ol class="checklist">
-          <li>In Cloudflare DNS, add an <strong>A</strong> (IPv4) and/or <strong>AAAA</strong> (IPv6) record for your subdomain pointing to beast&rsquo;s public IP (or CNAME if applicable).</li>
+          <li>In Cloudflare DNS, add an <strong>A</strong> (IPv4) and/or <strong>AAAA</strong> (IPv6) record for your subdomain pointing to this host&rsquo;s public IP (or CNAME if applicable).</li>
           <li>Set proxy status to <strong>DNS only</strong> (<strong>grey cloud</strong>), not Proxied (orange cloud).</li>
-          <li>Ensure beast firewall/router forwards ports <strong>80</strong> and <strong>443</strong> to the host running Compose.</li>
+          <li>Ensure the firewall/router forwards ports <strong>80</strong> and <strong>443</strong> to the machine running Compose.</li>
           <li>Wait for DNS to resolve publicly (<code>dig</code> or Cloudflare dashboard).</li>
           <li>Save Settings with <strong>Enable HTTPS</strong> checked, then run the Compose command shown in the Status section above.</li>
         </ol>
@@ -112,7 +112,6 @@
     </section>
   </main>
   <script src="/ui/static/app.js"></script>
-  <script>document.addEventListener('DOMContentLoaded', function() { AV.initAppChrome(); AV.initSettingsPage(); });</script>
 </body>
 </html>
 {{end}}

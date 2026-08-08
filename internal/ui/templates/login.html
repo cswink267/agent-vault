@@ -13,7 +13,7 @@
     <h1>Agent Vault</h1>
     <p id="login-vault-status" class="login-vault-status" aria-live="polite"></p>
     <p class="text-muted">Sign in with your vault passphrase.</p>
-    <form id="login-form" class="form-card">
+    <form id="login-form" class="form-card" method="post" action="/ui/login">
       <label for="passphrase">Passphrase</label>
       <input type="password" id="passphrase" name="passphrase" autocomplete="current-password" required>
       <p id="login-error" class="form-error" hidden></p>
@@ -21,7 +21,6 @@
     </form>
   </main>
   <script src="/ui/static/app.js"></script>
-  <script>document.addEventListener('DOMContentLoaded', function() { AV.initLoginPage(); });</script>
 </body>
 </html>
 {{end}}

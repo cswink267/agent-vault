@@ -9,7 +9,8 @@ func SecurityHeaders(h http.Handler) http.Handler {
 		hdr.Set("X-Content-Type-Options", "nosniff")
 		hdr.Set("X-Frame-Options", "DENY")
 		hdr.Set("Referrer-Policy", "no-referrer")
-		hdr.Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'")
+		// script-src/style-src stay 'self' only — UI bootstraps from /ui/static/app.js (no inline scripts).
+		hdr.Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; form-action 'self'; base-uri 'self'")
 		hdr.Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
 		h.ServeHTTP(w, r)
 	})

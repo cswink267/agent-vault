@@ -17,4 +17,4 @@ Follow the **universal** skill and docs—behavior is the same for every agent:
 3. Ensure `vault-mcp` is on `PATH` (Docker image: `/usr/local/bin/vault-mcp`).
 4. Prefer MCP tools; fall back to the `vault` CLI in the terminal if MCP is unavailable.
 
-Default LAN URL: `http://beast:8200`. For cloud agents, use `https://<hostname>` after HTTPS is enabled in Settings.
+Example URL: `http://localhost:8200`. For cloud agents, use `https://<hostname>` after HTTPS is enabled in Settings.

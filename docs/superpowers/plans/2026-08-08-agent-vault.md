@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship a from-scratch single-user encrypted vault (Go + SQLite) with REST API, CLI, MCP server, agent skills, and Docker Compose so Cursor, Claude Code, and Hermes can share credentials on beast.
+**Goal:** Ship a from-scratch single-user encrypted vault (Go + SQLite) with REST API, CLI, MCP server, agent skills, and Docker Compose so Cursor, Claude Code, and Hermes can share credentials on the host.
 
 **Architecture:** One `vault-server` process owns seal state, envelope encryption, SQLite persistence, token auth, and audit. CLI and MCP are HTTP clients. Skills teach agents when to call vault tools. Auto-unseal via key file on trusted host.
 
@@ -45,7 +45,7 @@
 | `skills/claude/SKILL.md` | Claude Code skill |
 | `skills/hermes/SKILL.md` | Hermes skill |
 | `Dockerfile` | Multi-stage build |
-| `deploy/docker-compose.yml` | Beast deploy |
+| `deploy/docker-compose.yml` | Host deploy |
 | `README.md` | Quickstart |
 
 ---
@@ -946,7 +946,7 @@ Include: when to store/retrieve; never echo secrets; prefer MCP tools listed; fa
     "agent-vault": {
       "command": "vault-mcp",
       "env": {
-        "AGENT_VAULT_URL": "http://beast:8080",
+        "AGENT_VAULT_URL": "http://localhost:8080",
         "AGENT_VAULT_TOKEN": "<token>"
       }
     }
@@ -985,7 +985,7 @@ git commit -m "docs(skills): add Cursor, Claude Code, and Hermes vault skills"
 
 **Interfaces:**
 - Consumes: binaries from prior tasks
-- Produces: runnable Compose stack on beast
+- Produces: runnable Compose stack on the host
 
 - [ ] **Step 1: Dockerfile**
 
@@ -1125,7 +1125,7 @@ git commit -m "test: add smoke script and align search API path in spec"
 | CLI | 6 |
 | MCP tools | 7 |
 | Skills Cursor/Claude/Hermes | 8 |
-| Docker Compose on beast | 9 |
+| Docker Compose on the host | 9 |
 | Token auth works while sealed | 4, 5 |
 | No remote unauthenticated init | 4, 5, 6 |
 | Cross-agent same name | 4–8 (shared API) |

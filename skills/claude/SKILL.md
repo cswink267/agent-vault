@@ -15,7 +15,7 @@ Follow the **universal** skill and docs—behavior is the same for every agent:
 1. Install `vault` and `vault-mcp` (or use the Docker image binaries).
 2. Register `vault-mcp` as a stdio MCP server with:
 
-   - `AGENT_VAULT_URL` — e.g. `http://beast:8200` or `https://<hostname>`
+   - `AGENT_VAULT_URL` — e.g. `http://localhost:8200` or `https://<hostname>`
    - `AGENT_VAULT_TOKEN` — agent-scoped token
 
    Shape reference: [`../mcp.stdio.json.example`](../mcp.stdio.json.example) (adapt to Claude’s MCP config format).

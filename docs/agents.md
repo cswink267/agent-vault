@@ -2,7 +2,7 @@
 
 Agent Vault is **not** locked to Cursor, Claude Code, or Hermes. Any process that can speak **HTTP**, run a **CLI**, or launch an **MCP stdio** server can use it.
 
-This page is the integration guide for AI agents, automation bots, CI jobs, and IDE plugins.
+This page is the integration guide for AI agents, automation bots, CI jobs, and IDE plugins. If you are the human setting this up, mint an **agent**-scoped token first ([install guide](install-and-ops.md)), then hand the agent this page or [`skills/SKILL.md`](../skills/SKILL.md).
 
 ## Pick an integration path
 
@@ -46,7 +46,7 @@ See [`skills/mcp.stdio.json.example`](../skills/mcp.stdio.json.example):
     "agent-vault": {
       "command": "vault-mcp",
       "env": {
-        "AGENT_VAULT_URL": "http://beast:8200",
+        "AGENT_VAULT_URL": "http://localhost:8200",
         "AGENT_VAULT_TOKEN": "<agent-scoped-token>"
       }
     }
@@ -92,7 +92,7 @@ If your product uses a different key than `mcpServers`, keep `command: vault-mcp
 Install `vault` on the agent’s machine (or mount the Docker image binary). Ensure it is on `PATH`.
 
 ```bash
-export AGENT_VAULT_URL=http://beast:8200   # or https://vault.example.com
+export AGENT_VAULT_URL=http://localhost:8200   # or https://vault.example.com
 export AGENT_VAULT_TOKEN=avt_…
 
 vault search openai
@@ -136,7 +136,7 @@ Full route list: [API](api.md).
 Operator (admin token) once:
 
 ```bash
-export AGENT_VAULT_URL=http://beast:8200
+export AGENT_VAULT_URL=http://localhost:8200
 export AGENT_VAULT_TOKEN=<admin-token>
 
 vault token create --label <agent-name> --scope agent
@@ -159,8 +159,8 @@ vault token revoke --id <id>
 ## Cloud / remote agents
 
 1. Operator enables HTTPS in Settings (see [Install](install-and-ops.md)).
-2. Agent uses `AGENT_VAULT_URL=https://<hostname>`.
-3. Prefer agent-scoped tokens + optional IP allowlist for the agent egress IPs if stable.
+2. Agent uses `AGENT_VAULT_URL=https://vault.example.com` (or `https://<hostname>`).
+3. Prefer agent-scoped tokens. IP allowlist is **optional and empty by default** (all IPs allowed)—only add egress IPs if the operator chooses to restrict access.
 
 ## What agents should not do
 

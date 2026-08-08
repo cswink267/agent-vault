@@ -1,4 +1,4 @@
-# Canonical Compose stack for agent-vault on beast.
+# Canonical Compose stack for agent-vault.
 #
 # First boot (empty vault-data volume): set AGENT_VAULT_INIT=1 and AGENT_VAULT_PASSPHRASE.
 # The server initializes the DB, writes /data/unseal.key (mode 0600), logs the root token once,

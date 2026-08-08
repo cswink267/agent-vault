@@ -12,7 +12,7 @@ Give the single vault owner on-demand **disaster-recovery snapshots** and **port
 
 ## Goals
 
-1. Snapshot archive of on-disk encrypted state (`vault.db` + `unseal.key`) for fast beast recovery.
+1. Snapshot archive of on-disk encrypted state (`vault.db` + `unseal.key`) for fast host recovery.
 2. Portable export of secret records re-encrypted under a backup passphrase.
 3. CLI restore (snapshot) and import (export); Admin UI can download both, not restore/import.
 4. Safe defaults: no plaintext leaks in logs/audit; refuse destructive restore without `--force`.
@@ -133,7 +133,7 @@ Audit actions: `backup_snapshot`, `backup_export` (no secret values, no passphra
 
 ## Deploy / docs
 
-- README section: backup vs export, restore steps on beast, warn about token remint after snapshot restore.
+- README section: backup vs export, restore steps on the host, warn about token remint after snapshot restore.
 - Skills: one line that humans can download backups from Admin UI; restore/import via CLI.
 
 ## Success criteria
@@ -156,4 +156,4 @@ Audit actions: `backup_snapshot`, `backup_export` (no secret values, no passphra
 
 ## Sequencing note
 
-After this slice ships and is verified on beast: **Phase 2c — HTTPS** reverse-proxy Compose profile for cloud agents.
+After this slice ships and is verified on the host: **Phase 2c — HTTPS** reverse-proxy Compose profile for cloud agents.

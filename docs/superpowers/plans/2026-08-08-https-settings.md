@@ -182,7 +182,7 @@ git commit -m "feat(vault): persist settings and write generated Caddyfile"
 - `PUT /ui/api/settings` — session+CSRF body `{public_hostname, https_enabled}`
 - Page sections: Network & HTTPS (form + Cloudflare grey-cloud checklist + status + apply hint), placeholders for Security/Backup filled in Task 4
 
-Cloudflare checklist copy must include: A/AAAA to beast public IP; **DNS only (grey cloud)**; forward 80/443; wait for DNS; save+enable; run compose profile command from `apply_hint`.
+Cloudflare checklist copy must include: A/AAAA to this host public IP; **DNS only (grey cloud)**; forward 80/443; wait for DNS; save+enable; run compose profile command from `apply_hint`.
 
 - [ ] **Step 1: API tests** — unauth 401; PUT without CSRF 403; PUT valid updates GET; invalid hostname 400
 

@@ -15,7 +15,7 @@ Follow the **universal** skill and docs—behavior is the same for every agent:
 Hermes often has a shell but no MCP host. **Prefer the CLI:**
 
 ```bash
-export AGENT_VAULT_URL=http://beast:8200
+export AGENT_VAULT_URL=http://localhost:8200
 export AGENT_VAULT_TOKEN=<agent-scoped-token>
 
 vault search <query>

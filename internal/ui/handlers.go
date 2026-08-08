@@ -72,6 +72,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /ui/s/{name}", s.withPageAuth(s.handleDetailPage))
 	mux.HandleFunc("GET /ui/audit", s.withPageAuth(s.handleAuditPage))
 	mux.HandleFunc("GET /ui/settings", s.withPageAuth(s.handleSettingsPage))
+	mux.HandleFunc("GET /ui/docs", s.withPageAuth(s.handleDocsPage))
+	mux.HandleFunc("GET /ui/docs/{slug}", s.withPageAuth(s.handleDocsPage))
 	return security.SecurityHeaders(mux)
 }
 

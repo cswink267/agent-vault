@@ -20,7 +20,7 @@ Add an Admin UI **Settings** home for operator configuration — especially a pu
 
 ## Non-goals
 
-- Tailscale / Cloudflare orange-cloud / Origin certificates (this slice is DNS-only + LE on beast).
+- Tailscale / Cloudflare orange-cloud / Origin certificates (this slice is DNS-only + LE on the host).
 - Storing Cloudflare API tokens or automating DNS record creation.
 - Built-in IP allowlists or SSO (may come later).
 - Vault process terminating TLS itself (Caddy terminates TLS).
@@ -30,7 +30,7 @@ Add an Admin UI **Settings** home for operator configuration — especially a pu
 
 | Path | Use |
 |------|-----|
-| `http://beast:8200` (or LAN IP) | Private HTTP; default first-boot access |
+| `http://localhost:8200` (or LAN IP) | Private HTTP; default first-boot access |
 | `https://<public_hostname>` | Public HTTPS via Caddy; cloud agents / remote UI |
 
 TLS encrypts transit; **bearer tokens and UI passphrase sessions remain mandatory**. Do not expose without strong credentials.
@@ -71,9 +71,9 @@ Session-required page with sections:
 
 - Inputs: Public hostname, Enable HTTPS checkbox.
 - **Cloudflare setup checklist** (DNS-only / grey cloud), shown whenever hostname is non-empty or user expands help:
-  1. In Cloudflare DNS, add **A** (IPv4) and/or **AAAA** (IPv6) for the subdomain → beast’s public IP (or CNAME if applicable).
+  1. In Cloudflare DNS, add **A** (IPv4) and/or **AAAA** (IPv6) for the subdomain → this host's public IP (or CNAME if applicable).
   2. Set proxy status to **DNS only** (grey cloud), not Proxied.
-  3. Ensure beast firewall/router forwards **80** and **443** to the host running Compose.
+  3. Ensure firewall/router forwards **80** and **443** to the machine running Compose.
   4. Wait for DNS to resolve publicly (`dig` / Cloudflare dashboard).
   5. Save Settings with **Enable HTTPS** checked, then start/reload the Compose `https` profile (command shown in UI).
 - Status line: current private URL, suggested public URL `https://<hostname>`, whether Caddyfile is active/stub.
@@ -193,7 +193,7 @@ Root `docker-compose.yml` and `deploy/docker-compose.yml` stay in sync (canonica
 
 | Topic | Decision |
 |-------|----------|
-| Certs | Let’s Encrypt via Caddy on beast |
+| Certs | Let’s Encrypt via Caddy on the host |
 | DNS | Cloudflare DNS-only (grey cloud); manual records |
 | First boot | No subdomain required |
 | Settings | UI for hostname/HTTPS + security ops + backup |

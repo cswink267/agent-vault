@@ -1,9 +1,11 @@
 # HTTP API reference
 
+Machine-oriented reference for `/v1`. Day to day, humans usually prefer the [Admin UI](admin-ui.md) or [CLI](cli.md); agents and custom clients use these routes.
+
 Base URL examples:
 
 - `http://localhost:8200`
-- `http://beast:8200`
+- `http://<hostname>:8200`
 - `https://vault.example.com`
 
 Unless noted, endpoints require:
@@ -13,7 +15,7 @@ Authorization: Bearer avt_…
 Content-Type: application/json
 ```
 
-JSON errors look like `{"error":"…"}`.
+JSON errors look like `{"error":"…"}`. An empty IP allowlist (the default) does not affect these routes; a non-empty allowlist returns `403` for clients outside the list.
 
 ## Auth and scopes
 

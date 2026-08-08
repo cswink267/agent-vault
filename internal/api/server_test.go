@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -112,6 +113,42 @@ func TestUIMountedWithoutBearer(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("GET /v1/secrets without bearer status %d want 401", resp.StatusCode)
+	}
+}
+
+func TestUISessionCannotAccessV1Secrets(t *testing.T) {
+	dir := t.TempDir()
+	v, _, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := api.New(v)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar}
+
+	resp, err := client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"pass"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("login status %d want 200", resp.StatusCode)
+	}
+
+	resp, err = client.Get(ts.URL + "/v1/secrets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET /v1/secrets with UI session only status %d want 401 body %s", resp.StatusCode, b)
 	}
 }
 

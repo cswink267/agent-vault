@@ -61,11 +61,13 @@ var AV = (function () {
 
   function updateVaultChrome(data) {
     var statusEl = document.getElementById('vault-status');
+    var bannerEl = document.getElementById('sealed-banner');
     var lockBtn = document.getElementById('btn-lock');
     var unlockBtn = document.getElementById('btn-unlock');
     if (!data || !statusEl) return;
     statusEl.textContent = data.sealed ? 'Sealed' : 'Unlocked';
     statusEl.classList.toggle('sealed', !!data.sealed);
+    if (bannerEl) bannerEl.hidden = !data.sealed;
     if (lockBtn) lockBtn.hidden = !!data.sealed;
     if (unlockBtn) unlockBtn.hidden = !data.sealed;
   }
@@ -165,7 +167,11 @@ var AV = (function () {
   function renderSecretsTable(tbody, secrets) {
     if (!tbody) return;
     if (!secrets.length) {
-      tbody.innerHTML = '<tr><td colspan="4" class="text-muted">No secrets found.</td></tr>';
+      var emptyMsg = 'No secrets found.';
+      if (!window._avListHasQuery) {
+        emptyMsg = 'No secrets yet. <a href="/ui/secrets/new">Create one</a>.';
+      }
+      tbody.innerHTML = '<tr><td colspan="4" class="text-muted">' + emptyMsg + '</td></tr>';
       return;
     }
     tbody.innerHTML = secrets.map(function (sec) {
@@ -193,7 +199,8 @@ var AV = (function () {
     var messageEl = document.getElementById('list-message');
     clearMessage(messageEl);
     var path = '/ui/api/secrets';
-    if (query && (query.q || query.tag || query.type)) {
+    window._avListHasQuery = !!(query && (query.q || query.tag || query.type));
+    if (window._avListHasQuery) {
       var params = new URLSearchParams();
       if (query.q) params.set('q', query.q);
       if (query.tag) params.set('tag', query.tag);

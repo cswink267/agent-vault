@@ -222,6 +222,15 @@ textarea:focus {
   background: #fdf6ec;
 }
 
+.sealed-banner {
+  padding: 0.625rem var(--space);
+  background: #fdf6ec;
+  border-bottom: 1px solid #e8c9a0;
+  color: #6b4f2a;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
 .search-bar {
   display: flex;
   flex-wrap: wrap;

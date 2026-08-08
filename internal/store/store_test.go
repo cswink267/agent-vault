@@ -54,3 +54,32 @@ func TestSecretCRUDAndSearch(t *testing.T) {
 		t.Fatalf("audit: %v %+v", err, aud)
 	}
 }
+
+func TestVacuumInto(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "vault.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	if err := s.SetMeta("test", "value"); err != nil {
+		t.Fatal(err)
+	}
+
+	copyPath := filepath.Join(dir, "copy.db")
+	if err := s.VacuumInto(copyPath); err != nil {
+		t.Fatal(err)
+	}
+
+	copyStore, err := store.Open(copyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer copyStore.Close()
+
+	v, ok, err := copyStore.GetMeta("test")
+	if err != nil || !ok || v != "value" {
+		t.Fatalf("copied meta: %v %v %q", err, ok, v)
+	}
+}

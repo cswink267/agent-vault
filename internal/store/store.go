@@ -107,6 +107,11 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+func (s *Store) VacuumInto(path string) error {
+	_, err := s.db.Exec(`VACUUM INTO ?`, path)
+	return err
+}
+
 func (s *Store) GetMeta(key string) (string, bool, error) {
 	var value string
 	err := s.db.QueryRow(`SELECT value FROM vault_meta WHERE key = ?`, key).Scan(&value)

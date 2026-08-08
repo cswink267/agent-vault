@@ -105,7 +105,7 @@ Base path `/v1`. Authorization: `Authorization: Bearer <token>`.
 | GET | `/v1/secrets/{name}` | Get; `?reveal=1` includes decrypted fields |
 | PUT | `/v1/secrets/{name}` | Update |
 | DELETE | `/v1/secrets/{name}` | Delete |
-| GET | `/v1/secrets:search` | Query `q`, `tag`, `type` |
+| GET | `/v1/search` | Query `q`, `tag`, `type` |
 | GET | `/v1/audit` | Recent events |
 | POST | `/v1/tokens` | Mint labeled token (authenticated) |
 

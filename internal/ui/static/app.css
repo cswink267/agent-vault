@@ -324,6 +324,32 @@ input[type="password"]#new-secret {
   color: #6b4f2a;
 }
 
+.passphrase-panel {
+  max-width: 28rem;
+  margin: 0 auto var(--space);
+  padding: 0 var(--space);
+}
+
+.passphrase-panel summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.passphrase-form {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.passphrase-form label {
+  font-size: 0.875rem;
+}
+
 .page-login {
   display: flex;
   align-items: center;

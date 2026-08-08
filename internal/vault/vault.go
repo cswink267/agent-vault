@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -35,9 +36,10 @@ var validTypes = map[string]bool{
 }
 
 type Vault struct {
-	mu     sync.RWMutex
-	store  *store.Store
-	master *crypto.MasterKey
+	mu      sync.RWMutex
+	store   *store.Store
+	master  *crypto.MasterKey
+	dataDir string
 }
 
 type InitResult struct {
@@ -139,7 +141,7 @@ func Init(dataDir, passphrase string) (*Vault, InitResult, error) {
 	}
 
 	m := master
-	v := &Vault{store: st, master: &m}
+	v := &Vault{store: st, master: &m, dataDir: dataDir}
 	return v, InitResult{Token: plaintext, UnsealKeyHex: unsealKeyHex}, nil
 }
 
@@ -149,7 +151,7 @@ func Open(dataDir string) (*Vault, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Vault{store: st}, nil
+	return &Vault{store: st, dataDir: dataDir}, nil
 }
 
 func (v *Vault) Sealed() bool {
@@ -186,6 +188,188 @@ func (v *Vault) LoginWithPassphrase(passphrase, actorLabel string) error {
 		return nil
 	}
 	return v.UnlockWithKey(master, actorLabel)
+}
+
+// ChangePassphrase rewraps the current master key under a new passphrase-derived KEK.
+// Requires an unsealed vault. Does not modify unseal.key, secrets, or the in-memory master.
+// All bearer tokens are revoked and a fresh root token is minted (returned once).
+func (v *Vault) ChangePassphrase(oldPass, newPass, actorLabel string) (string, error) {
+	if newPass == "" {
+		return "", errors.New("new passphrase is required")
+	}
+	if newPass == oldPass {
+		return "", errors.New("new passphrase must differ from old passphrase")
+	}
+
+	live, err := v.copyMaster()
+	if err != nil {
+		return "", err
+	}
+
+	unwrapped, err := v.unwrapMasterFromPassphrase(oldPass)
+	if err != nil {
+		return "", ErrInvalidMasterKey
+	}
+	if subtle.ConstantTimeCompare(unwrapped[:], live[:]) != 1 {
+		return "", ErrInvalidMasterKey
+	}
+
+	salt, err := crypto.NewSalt()
+	if err != nil {
+		return "", err
+	}
+	kek, err := crypto.DeriveKey(newPass, salt)
+	if err != nil {
+		return "", err
+	}
+	wrapped, err := crypto.WrapKey(live, kek)
+	if err != nil {
+		return "", err
+	}
+
+	if err := v.store.SetMeta("salt", hex.EncodeToString(salt)); err != nil {
+		return "", err
+	}
+	if err := v.store.SetMeta("wrapped_master", hex.EncodeToString(wrapped)); err != nil {
+		return "", err
+	}
+
+	actor := actorLabel
+	if actor == "" {
+		actor = "unknown"
+	}
+	if err := v.store.AppendAudit(actor, "change_passphrase", ""); err != nil {
+		return "", err
+	}
+	return v.revokeTokensAndMintRoot(actor)
+}
+
+func (v *Vault) revokeTokensAndMintRoot(actor string) (string, error) {
+	if _, err := v.store.DeleteAllTokens(); err != nil {
+		return "", err
+	}
+	if err := v.store.AppendAudit(actor, "revoke_tokens", ""); err != nil {
+		return "", err
+	}
+	plaintext, hash, err := auth.NewToken()
+	if err != nil {
+		return "", err
+	}
+	if _, err := v.store.CreateToken("root", hash); err != nil {
+		return "", err
+	}
+	if v.dataDir != "" {
+		rootPath := filepath.Join(v.dataDir, "root.token")
+		if err := os.WriteFile(rootPath, []byte(plaintext), 0o600); err != nil {
+			return "", err
+		}
+	}
+	return plaintext, nil
+}
+
+// RotateMasterKey generates a new master key, rewraps all secret DEKs, updates
+// unseal.key, and rewraps the master under the current passphrase. Bearer tokens
+// are revoked and a fresh root token is returned once.
+func (v *Vault) RotateMasterKey(passphrase, actorLabel string) (string, error) {
+	if passphrase == "" {
+		return "", errors.New("passphrase is required")
+	}
+	oldMaster, err := v.copyMaster()
+	if err != nil {
+		return "", err
+	}
+	unwrapped, err := v.unwrapMasterFromPassphrase(passphrase)
+	if err != nil {
+		return "", ErrInvalidMasterKey
+	}
+	if subtle.ConstantTimeCompare(unwrapped[:], oldMaster[:]) != 1 {
+		return "", ErrInvalidMasterKey
+	}
+
+	newMaster, err := crypto.GenerateMasterKey()
+	if err != nil {
+		return "", err
+	}
+
+	rows, err := v.store.ListSecrets()
+	if err != nil {
+		return "", err
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	updated := make([]store.SecretRow, len(rows))
+	for i, row := range rows {
+		secWrap, err := rewrapDEK(oldMaster, newMaster, row.SecretWrappedDEK)
+		if err != nil {
+			return "", fmt.Errorf("rewrap secret %s: %w", row.Name, err)
+		}
+		userWrap, err := rewrapDEK(oldMaster, newMaster, row.UsernameWrappedDEK)
+		if err != nil {
+			return "", fmt.Errorf("rewrap username %s: %w", row.Name, err)
+		}
+		row.SecretWrappedDEK = secWrap
+		row.UsernameWrappedDEK = userWrap
+		row.UpdatedAt = now
+		row.Version++
+		updated[i] = row
+	}
+
+	salt, err := crypto.NewSalt()
+	if err != nil {
+		return "", err
+	}
+	kek, err := crypto.DeriveKey(passphrase, salt)
+	if err != nil {
+		return "", err
+	}
+	wrapped, err := crypto.WrapKey(newMaster, kek)
+	if err != nil {
+		return "", err
+	}
+
+	if err := v.store.ApplyMasterRotation(
+		updated,
+		hex.EncodeToString(salt),
+		hex.EncodeToString(wrapped),
+		hex.EncodeToString(masterCheck(newMaster)),
+	); err != nil {
+		return "", err
+	}
+
+	if v.dataDir != "" {
+		unsealPath := filepath.Join(v.dataDir, "unseal.key")
+		if err := os.WriteFile(unsealPath, []byte(hex.EncodeToString(newMaster[:])), 0o600); err != nil {
+			return "", err
+		}
+	}
+
+	v.mu.Lock()
+	m := newMaster
+	v.master = &m
+	v.mu.Unlock()
+
+	actor := actorLabel
+	if actor == "" {
+		actor = "unknown"
+	}
+	if err := v.store.AppendAudit(actor, "rotate_master", ""); err != nil {
+		return "", err
+	}
+	token, err := v.revokeTokensAndMintRoot(actor)
+	if err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+func rewrapDEK(oldMaster, newMaster crypto.MasterKey, wrapped []byte) ([]byte, error) {
+	if len(wrapped) == 0 {
+		return wrapped, nil
+	}
+	dek, err := crypto.UnwrapKey(wrapped, oldMaster)
+	if err != nil {
+		return nil, err
+	}
+	return crypto.WrapKey(dek, newMaster)
 }
 
 func (v *Vault) unwrapMasterFromPassphrase(passphrase string) (crypto.MasterKey, error) {

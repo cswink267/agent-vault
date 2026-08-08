@@ -291,6 +291,130 @@ func TestUnlockLock(t *testing.T) {
 	assertAuditActions(t, audit, "unlock", "search", "lock")
 }
 
+func TestChangePassphraseAPI(t *testing.T) {
+	dir := t.TempDir()
+	v, res, err := vault.Init(dir, "old-pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := api.New(v)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	token := res.Token
+
+	resp, err := doAuth(http.MethodPost, ts.URL+"/v1/change-passphrase", token, `{"old_passphrase":"wrong","new_passphrase":"new-pass"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("wrong old status %d body %s", resp.StatusCode, b)
+	}
+
+	resp, err = doAuth(http.MethodPost, ts.URL+"/v1/change-passphrase", token, `{"old_passphrase":"old-pass","new_passphrase":"new-pass"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("change status %d body %s", resp.StatusCode, b)
+	}
+	var changeBody map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&changeBody); err != nil {
+		t.Fatal(err)
+	}
+	newToken, _ := changeBody["token"].(string)
+	if newToken == "" || newToken == token {
+		t.Fatalf("expected new root token, got %#v", changeBody["token"])
+	}
+
+	// old bearer token is dead
+	resp, err = doAuth(http.MethodPost, ts.URL+"/v1/lock", token, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("old token should be unauthorized, got %d", resp.StatusCode)
+	}
+
+	v.Lock()
+	resp, err = doAuth(http.MethodPost, ts.URL+"/v1/unlock", newToken, `{"passphrase":"new-pass"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("unlock with new status %d body %s", resp.StatusCode, b)
+	}
+
+	v.Lock()
+	resp, err = doAuth(http.MethodPost, ts.URL+"/v1/change-passphrase", newToken, `{"old_passphrase":"new-pass","new_passphrase":"newer"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("sealed change status %d body %s", resp.StatusCode, b)
+	}
+}
+
+func TestRotateMasterAPI(t *testing.T) {
+	dir := t.TempDir()
+	v, res, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Put("root", vault.Secret{Name: "k", Type: "api_key", Secret: "abc"}); err != nil {
+		t.Fatal(err)
+	}
+	srv := api.New(v)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := doAuth(http.MethodPost, ts.URL+"/v1/rotate-master", res.Token, `{"passphrase":"wrong"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("wrong pass status %d body %s", resp.StatusCode, b)
+	}
+
+	resp, err = doAuth(http.MethodPost, ts.URL+"/v1/rotate-master", res.Token, `{"passphrase":"pass"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("rotate status %d body %s", resp.StatusCode, b)
+	}
+	var body map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	newTok, _ := body["token"].(string)
+	if newTok == "" {
+		t.Fatal("missing token")
+	}
+
+	resp, err = doAuth(http.MethodGet, ts.URL+"/v1/secrets/k?reveal=1", newTok, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("get after rotate %d %s", resp.StatusCode, b)
+	}
+}
+
 func TestCreateSecretConflictDoesNotOverwrite(t *testing.T) {
 	dir := t.TempDir()
 	v, res, err := vault.Init(dir, "pass")

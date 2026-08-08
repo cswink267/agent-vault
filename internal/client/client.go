@@ -66,6 +66,35 @@ func (c *Client) Lock() error {
 	return c.doJSON(http.MethodPost, "/v1/lock", true, nil, &out)
 }
 
+func (c *Client) ChangePassphrase(oldPassphrase, newPassphrase string) (string, error) {
+	body := map[string]string{
+		"old_passphrase": oldPassphrase,
+		"new_passphrase": newPassphrase,
+	}
+	var out struct {
+		OK    bool   `json:"ok"`
+		Token string `json:"token"`
+		Label string `json:"label"`
+	}
+	if err := c.doJSON(http.MethodPost, "/v1/change-passphrase", true, body, &out); err != nil {
+		return "", err
+	}
+	return out.Token, nil
+}
+
+func (c *Client) RotateMaster(passphrase string) (string, error) {
+	body := map[string]string{"passphrase": passphrase}
+	var out struct {
+		OK    bool   `json:"ok"`
+		Token string `json:"token"`
+		Label string `json:"label"`
+	}
+	if err := c.doJSON(http.MethodPost, "/v1/rotate-master", true, body, &out); err != nil {
+		return "", err
+	}
+	return out.Token, nil
+}
+
 func (c *Client) List() ([]vault.Secret, error) {
 	var raw []secretJSON
 	if err := c.doJSON(http.MethodGet, "/v1/secrets", true, nil, &raw); err != nil {

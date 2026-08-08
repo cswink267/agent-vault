@@ -35,6 +35,10 @@ func run(cmd string, args []string) error {
 		return cmdUnlock(args)
 	case "lock":
 		return cmdLock(args)
+	case "change-passphrase":
+		return cmdChangePassphrase(args)
+	case "rotate-master":
+		return cmdRotateMaster(args)
 	case "set":
 		return cmdSet(args)
 	case "get":
@@ -61,16 +65,18 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `Usage: vault <command> [flags]
 
 Commands:
-  init      Initialize local vault (--data-dir, --passphrase)
-  unlock    Unlock remote vault (--passphrase)
-  lock      Lock remote vault
-  set       Create or update a secret
-  get       Get a secret (reveals value)
-  list      List secrets
-  search    Search secrets
-  delete    Delete a secret
-  audit     Show audit log
-  token     Token management (create)
+  init                Initialize local vault (--data-dir, --passphrase)
+  unlock              Unlock remote vault (--passphrase)
+  lock                Lock remote vault
+  change-passphrase   Rewrap master under a new passphrase (--old, --new)
+  rotate-master       Generate new master key and rewrap secrets (--passphrase)
+  set                 Create or update a secret
+  get                 Get a secret (reveals value)
+  list                List secrets
+  search              Search secrets
+  delete              Delete a secret
+  audit               Show audit log
+  token               Token management (create)
 
 Environment:
   AGENT_VAULT_URL    Base URL for remote commands (default http://localhost:8080)
@@ -144,6 +150,74 @@ func cmdLock(args []string) error {
 		return err
 	}
 	fmt.Println("vault locked")
+	return nil
+}
+
+func cmdChangePassphrase(args []string) error {
+	fs := flag.NewFlagSet("change-passphrase", flag.ContinueOnError)
+	oldPass := fs.String("old", "", "current passphrase")
+	newPass := fs.String("new", "", "new passphrase")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	old := *oldPass
+	if old == "" {
+		fmt.Fprint(os.Stderr, "Current passphrase: ")
+		var err error
+		old, err = readPassphrase()
+		if err != nil {
+			return err
+		}
+	}
+	neu := *newPass
+	if neu == "" {
+		fmt.Fprint(os.Stderr, "New passphrase: ")
+		var err error
+		neu, err = readPassphrase()
+		if err != nil {
+			return err
+		}
+	}
+	c, err := newClient()
+	if err != nil {
+		return err
+	}
+	token, err := c.ChangePassphrase(old, neu)
+	if err != nil {
+		return err
+	}
+	fmt.Println("passphrase changed; all bearer tokens revoked")
+	fmt.Printf("New root token (save now, shown once): %s\n", token)
+	fmt.Println("Update AGENT_VAULT_TOKEN / ~/.config/agent-vault env with the new token.")
+	return nil
+}
+
+func cmdRotateMaster(args []string) error {
+	fs := flag.NewFlagSet("rotate-master", flag.ContinueOnError)
+	passphrase := fs.String("passphrase", "", "current vault passphrase")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	pass := *passphrase
+	if pass == "" {
+		fmt.Fprint(os.Stderr, "Passphrase: ")
+		var err error
+		pass, err = readPassphrase()
+		if err != nil {
+			return err
+		}
+	}
+	c, err := newClient()
+	if err != nil {
+		return err
+	}
+	token, err := c.RotateMaster(pass)
+	if err != nil {
+		return err
+	}
+	fmt.Println("master key rotated; unseal.key rewritten; all bearer tokens revoked")
+	fmt.Printf("New root token (save now, shown once): %s\n", token)
+	fmt.Println("Update AGENT_VAULT_TOKEN / ~/.config/agent-vault env with the new token.")
 	return nil
 }
 

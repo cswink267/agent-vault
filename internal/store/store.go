@@ -311,6 +311,60 @@ func (s *Store) FindTokenByHash(hash string) (TokenRow, bool, error) {
 	return r, true, nil
 }
 
+func (s *Store) DeleteAllTokens() (int64, error) {
+	res, err := s.db.Exec(`DELETE FROM tokens`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// ApplyMasterRotation atomically updates secret DEK wraps and master wrap metadata.
+func (s *Store) ApplyMasterRotation(rows []SecretRow, saltHex, wrappedMasterHex, masterCheckHex string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, row := range rows {
+		res, err := tx.Exec(`
+			UPDATE secrets SET
+				username_nonce = ?, username_ct = ?, username_wrapped_dek = ?,
+				secret_nonce = ?, secret_ct = ?, secret_wrapped_dek = ?,
+				updated_at = ?, version = ?
+			WHERE id = ?
+		`, row.UsernameNonce, row.UsernameCT, row.UsernameWrappedDEK,
+			row.SecretNonce, row.SecretCT, row.SecretWrappedDEK,
+			row.UpdatedAt, row.Version,
+			row.ID)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return fmt.Errorf("secret %s not updated", row.Name)
+		}
+	}
+
+	for _, kv := range [][2]string{
+		{"salt", saltHex},
+		{"wrapped_master", wrappedMasterHex},
+		{"master_check", masterCheckHex},
+	} {
+		if _, err := tx.Exec(`
+			INSERT INTO vault_meta (key, value) VALUES (?, ?)
+			ON CONFLICT(key) DO UPDATE SET value = excluded.value
+		`, kv[0], kv[1]); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *Store) AppendAudit(tokenLabel, action, secretName string) error {
 	_, err := s.db.Exec(`
 		INSERT INTO audit (ts, token_label, action, secret_name) VALUES (?, ?, ?, ?)

@@ -42,6 +42,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /ui/api/search", s.withSession(s.handleSearch))
 	mux.HandleFunc("POST /ui/api/lock", s.withSessionCSRF(s.handleLock))
 	mux.HandleFunc("POST /ui/api/unlock", s.withSessionCSRF(s.handleUnlock))
+	mux.HandleFunc("POST /ui/api/change-passphrase", s.withSessionCSRF(s.handleChangePassphrase))
+	mux.HandleFunc("POST /ui/api/rotate-master", s.withSessionCSRF(s.handleRotateMaster))
 	mux.HandleFunc("GET /ui/api/audit", s.withSession(s.handleAudit))
 
 	staticSub, _ := fs.Sub(staticFS, "static")
@@ -230,6 +232,83 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleChangePassphrase(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		OldPassphrase string `json:"old_passphrase"`
+		NewPassphrase string `json:"new_passphrase"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if body.OldPassphrase == "" || body.NewPassphrase == "" {
+		writeError(w, http.StatusBadRequest, "old_passphrase and new_passphrase are required")
+		return
+	}
+
+	actor := actorFromContext(r.Context())
+	token, err := s.Vault.ChangePassphrase(body.OldPassphrase, body.NewPassphrase, actor)
+	if err != nil {
+		switch {
+		case errors.Is(err, vault.ErrSealed):
+			writeError(w, http.StatusServiceUnavailable, "vault is sealed")
+		case errors.Is(err, vault.ErrInvalidMasterKey):
+			writeError(w, http.StatusUnauthorized, "invalid passphrase")
+		default:
+			msg := err.Error()
+			if strings.Contains(msg, "required") || strings.Contains(msg, "must differ") {
+				writeError(w, http.StatusBadRequest, msg)
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "internal error")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"ok":    true,
+		"token": token,
+		"label": "root",
+	})
+}
+
+func (s *Server) handleRotateMaster(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Passphrase string `json:"passphrase"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if body.Passphrase == "" {
+		writeError(w, http.StatusBadRequest, "passphrase is required")
+		return
+	}
+
+	actor := actorFromContext(r.Context())
+	token, err := s.Vault.RotateMasterKey(body.Passphrase, actor)
+	if err != nil {
+		switch {
+		case errors.Is(err, vault.ErrSealed):
+			writeError(w, http.StatusServiceUnavailable, "vault is sealed")
+		case errors.Is(err, vault.ErrInvalidMasterKey):
+			writeError(w, http.StatusUnauthorized, "invalid passphrase")
+		default:
+			msg := err.Error()
+			if strings.Contains(msg, "required") {
+				writeError(w, http.StatusBadRequest, msg)
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "internal error")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"ok":    true,
+		"token": token,
+		"label": "root",
+	})
 }
 
 func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {

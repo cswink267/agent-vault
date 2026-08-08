@@ -169,6 +169,124 @@ func TestUILoginCRUDRevealAndCSRF(t *testing.T) {
 	}
 }
 
+func TestUIChangePassphrase(t *testing.T) {
+	dir := t.TempDir()
+	v, _, err := vault.Init(dir, "old-pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uiSrv := ui.New(v)
+	ts := httptest.NewServer(uiSrv.Handler())
+	defer ts.Close()
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar}
+
+	resp, err := client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"old-pass"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("login status %d body %s", resp.StatusCode, b)
+	}
+	csrf := csrfFromJar(t, jar, ts.URL)
+	if csrf == "" {
+		t.Fatal("missing CSRF cookie after login")
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/ui/api/change-passphrase", strings.NewReader(`{"old_passphrase":"wrong","new_passphrase":"new-pass"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(ui.CSRFHeader, csrf)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("wrong old status %d body %s", resp.StatusCode, b)
+	}
+
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/ui/api/change-passphrase", strings.NewReader(`{"old_passphrase":"old-pass","new_passphrase":"new-pass"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(ui.CSRFHeader, csrf)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("change status %d body %s", resp.StatusCode, b)
+	}
+	var changeBody map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&changeBody); err != nil {
+		t.Fatal(err)
+	}
+	newTok, _ := changeBody["token"].(string)
+	if newTok == "" {
+		t.Fatal("expected root token in UI change response")
+	}
+
+	if err := v.VerifyPassphrase("new-pass"); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.VerifyPassphrase("old-pass"); err == nil {
+		t.Fatal("old passphrase should fail")
+	}
+}
+
+func TestUIRotateMaster(t *testing.T) {
+	dir := t.TempDir()
+	v, _, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Put("root", vault.Secret{Name: "k", Type: "note", Secret: "v"}); err != nil {
+		t.Fatal(err)
+	}
+	uiSrv := ui.New(v)
+	ts := httptest.NewServer(uiSrv.Handler())
+	defer ts.Close()
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar}
+	resp, err := client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"pass"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("login %d", resp.StatusCode)
+	}
+	csrf := csrfFromJar(t, jar, ts.URL)
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/ui/api/rotate-master", strings.NewReader(`{"passphrase":"pass"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(ui.CSRFHeader, csrf)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("rotate status %d body %s", resp.StatusCode, b)
+	}
+	got, err := v.Get("root", "k", true)
+	if err != nil || got.Secret != "v" {
+		t.Fatalf("secret after ui rotate: %+v err %v", got, err)
+	}
+}
+
 func TestUILoginWrongPassphrase(t *testing.T) {
 	dir := t.TempDir()
 	v, _, err := vault.Init(dir, "pass")

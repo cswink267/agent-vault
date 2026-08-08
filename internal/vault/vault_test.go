@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -67,6 +68,176 @@ func TestVerifyPassphraseAndLogin(t *testing.T) {
 	// already unsealed: login still ok
 	if err := v.LoginWithPassphrase("correct-horse", "ui"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestChangePassphrase(t *testing.T) {
+	dir := t.TempDir()
+	v, res, err := vault.Init(dir, "old-pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldToken := res.Token
+	if _, err := v.Put("root", vault.Secret{Name: "keep.me", Type: "note", Secret: "still-here"}); err != nil {
+		t.Fatal(err)
+	}
+	agentTok, err := v.CreateToken("root", "agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	newRoot, err := v.ChangePassphrase("old-pass", "new-pass", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newRoot == "" || newRoot == oldToken {
+		t.Fatalf("expected fresh root token, got %q", newRoot)
+	}
+	if v.Sealed() {
+		t.Fatal("change must leave vault unsealed")
+	}
+
+	if _, ok, err := v.Authenticate(oldToken); err != nil || ok {
+		t.Fatalf("old root token should be revoked: ok=%v err=%v", ok, err)
+	}
+	if _, ok, err := v.Authenticate(agentTok); err != nil || ok {
+		t.Fatalf("agent token should be revoked: ok=%v err=%v", ok, err)
+	}
+	if label, ok, err := v.Authenticate(newRoot); err != nil || !ok || label != "root" {
+		t.Fatalf("new root auth: label=%q ok=%v err=%v", label, ok, err)
+	}
+	written, err := os.ReadFile(filepath.Join(dir, "root.token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(written) != newRoot {
+		t.Fatalf("root.token mismatch")
+	}
+
+	if err := v.VerifyPassphrase("old-pass"); err == nil {
+		t.Fatal("old passphrase should fail after change")
+	}
+	if err := v.VerifyPassphrase("new-pass"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := v.Get("root", "keep.me", true)
+	if err != nil || got.Secret != "still-here" {
+		t.Fatalf("secret after change: %+v err %v", got, err)
+	}
+
+	v.Lock()
+	ok, err := v.TryAutoUnseal(filepath.Join(dir, "unseal.key"))
+	if err != nil || !ok {
+		t.Fatalf("unseal.key should still work: ok=%v err=%v", ok, err)
+	}
+	if err := v.UnlockWithPassphrase("new-pass"); err != nil {
+		t.Fatal(err)
+	}
+	v.Lock()
+	if err := v.UnlockWithPassphrase("old-pass"); err == nil {
+		t.Fatal("old passphrase unlock should fail")
+	}
+
+	// wrong old
+	v2, _, err := vault.Init(t.TempDir(), "correct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v2.ChangePassphrase("wrong", "newer", "test"); !errors.Is(err, vault.ErrInvalidMasterKey) {
+		t.Fatalf("wrong old: got %v want %v", err, vault.ErrInvalidMasterKey)
+	}
+
+	// sealed
+	v2.Lock()
+	if _, err := v2.ChangePassphrase("correct", "newer", "test"); !errors.Is(err, vault.ErrSealed) {
+		t.Fatalf("sealed: got %v want %v", err, vault.ErrSealed)
+	}
+
+	// empty / same
+	v3, _, err := vault.Init(t.TempDir(), "same-pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v3.ChangePassphrase("same-pass", "", "test"); err == nil {
+		t.Fatal("empty new should fail")
+	}
+	if _, err := v3.ChangePassphrase("same-pass", "same-pass", "test"); err == nil {
+		t.Fatal("same new should fail")
+	}
+}
+
+func TestRotateMasterKey(t *testing.T) {
+	dir := t.TempDir()
+	v, res, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldUnseal, err := os.ReadFile(filepath.Join(dir, "unseal.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Put("root", vault.Secret{Name: "a.key", Type: "api_key", Secret: "sk-keep", Username: "alice", Tags: []string{"t"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Put("root", vault.Secret{Name: "b.note", Type: "note", Secret: "plain"}); err != nil {
+		t.Fatal(err)
+	}
+
+	newToken, err := v.RotateMasterKey("pass", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newToken == "" || newToken == res.Token {
+		t.Fatalf("expected fresh root token")
+	}
+	if _, ok, _ := v.Authenticate(res.Token); ok {
+		t.Fatal("old token should be revoked")
+	}
+	if _, ok, err := v.Authenticate(newToken); err != nil || !ok {
+		t.Fatal("new token should work")
+	}
+
+	got, err := v.Get("root", "a.key", true)
+	if err != nil || got.Secret != "sk-keep" || got.Username != "alice" {
+		t.Fatalf("secret after rotate: %+v err %v", got, err)
+	}
+	got2, err := v.Get("root", "b.note", true)
+	if err != nil || got2.Secret != "plain" {
+		t.Fatalf("note after rotate: %+v err %v", got2, err)
+	}
+
+	newUnseal, err := os.ReadFile(filepath.Join(dir, "unseal.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(newUnseal) == string(oldUnseal) {
+		t.Fatal("unseal.key should change after master rotate")
+	}
+
+	v.Lock()
+	ok, err := v.TryAutoUnseal(filepath.Join(dir, "unseal.key"))
+	if err != nil || !ok {
+		t.Fatalf("auto-unseal after rotate: ok=%v err=%v", ok, err)
+	}
+	got3, err := v.Get("root", "a.key", true)
+	if err != nil || got3.Secret != "sk-keep" {
+		t.Fatalf("after auto-unseal: %+v err %v", got3, err)
+	}
+	if err := v.UnlockWithPassphrase("pass"); err != nil {
+		t.Fatal(err)
+	}
+
+	v2, _, err := vault.Init(t.TempDir(), "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v2.RotateMasterKey("wrong", "test"); !errors.Is(err, vault.ErrInvalidMasterKey) {
+		t.Fatalf("wrong pass: %v", err)
+	}
+	v2.Lock()
+	if _, err := v2.RotateMasterKey("x", "test"); !errors.Is(err, vault.ErrSealed) {
+		t.Fatalf("sealed: %v", err)
 	}
 }
 

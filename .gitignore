@@ -1,6 +1,6 @@
 .superpowers/
 
 bin/
-vault-server
-vault
-vault-mcp
+/vault-server
+/vault
+/vault-mcp

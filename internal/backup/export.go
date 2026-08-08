@@ -38,38 +38,15 @@ func SealExport(passphrase string, records []ExportRecord) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	salt, err := crypto.NewSalt()
-	if err != nil {
-		return nil, err
-	}
-	kdfParams := crypto.DefaultKDFParams
-	key, err := crypto.DeriveKeyWithParams(passphrase, salt, kdfParams)
-	if err != nil {
-		return nil, err
-	}
-
-	nonce, ciphertext, err := sealAESGCM(key, plaintext)
-	if err != nil {
-		return nil, err
-	}
-
-	return encodeExportBlob(kdfParams, salt, nonce, ciphertext), nil
+	return sealEnvelope(ExportMagic, passphrase, plaintext)
 }
 
 func OpenExport(passphrase string, blob []byte) ([]ExportRecord, error) {
-	kdfParams, salt, nonce, ciphertext, err := decodeExportBlob(blob)
+	plaintext, err := openEnvelope(ExportMagic, passphrase, blob)
 	if err != nil {
-		return nil, err
-	}
-
-	key, err := crypto.DeriveKeyWithParams(passphrase, salt, kdfParams)
-	if err != nil {
-		return nil, err
-	}
-
-	plaintext, err := openAESGCM(key, nonce, ciphertext)
-	if err != nil {
+		if errors.Is(err, ErrInvalidEnvelopeMagic) {
+			return nil, ErrInvalidExportMagic
+		}
 		return nil, err
 	}
 
@@ -78,66 +55,6 @@ func OpenExport(passphrase string, blob []byte) ([]ExportRecord, error) {
 		return nil, err
 	}
 	return records, nil
-}
-
-func encodeExportBlob(kdfParams crypto.KDFParams, salt, nonce, ciphertext []byte) []byte {
-	// AVE1 v1 stores Argon2id params in the header so exports remain
-	// decryptable if the default KDF cost changes later.
-	out := make([]byte, 0, 4+1+4+4+1+2+len(salt)+2+len(nonce)+len(ciphertext))
-	out = append(out, ExportMagic...)
-	out = append(out, exportHeaderVersion)
-	out = appendUint32BE(out, kdfParams.Time)
-	out = appendUint32BE(out, kdfParams.MemoryKiB)
-	out = append(out, kdfParams.Threads)
-	out = appendUint16BE(out, uint16(len(salt)))
-	out = append(out, salt...)
-	out = appendUint16BE(out, uint16(len(nonce)))
-	out = append(out, nonce...)
-	out = append(out, ciphertext...)
-	return out
-}
-
-func decodeExportBlob(blob []byte) (kdfParams crypto.KDFParams, salt, nonce, ciphertext []byte, err error) {
-	if len(blob) < 4+1+4+4+1+2+2 {
-		return crypto.KDFParams{}, nil, nil, nil, ErrExportTooShort
-	}
-	if string(blob[:4]) != ExportMagic {
-		return crypto.KDFParams{}, nil, nil, nil, ErrInvalidExportMagic
-	}
-	off := 4
-	if blob[off] != exportHeaderVersion {
-		return crypto.KDFParams{}, nil, nil, nil, ErrInvalidExportVersion
-	}
-	off++
-
-	kdfParams.Time = binary.BigEndian.Uint32(blob[off : off+4])
-	off += 4
-	kdfParams.MemoryKiB = binary.BigEndian.Uint32(blob[off : off+4])
-	off += 4
-	kdfParams.Threads = blob[off]
-	off++
-
-	saltLen, n := readUint16BE(blob, off)
-	off += n
-	if saltLen == 0 || off+int(saltLen) > len(blob) {
-		return crypto.KDFParams{}, nil, nil, nil, ErrExportTooShort
-	}
-	salt = blob[off : off+int(saltLen)]
-	off += int(saltLen)
-
-	nonceLen, n := readUint16BE(blob, off)
-	off += n
-	if nonceLen == 0 || off+int(nonceLen) > len(blob) {
-		return crypto.KDFParams{}, nil, nil, nil, ErrExportTooShort
-	}
-	nonce = blob[off : off+int(nonceLen)]
-	off += int(nonceLen)
-
-	if off >= len(blob) {
-		return crypto.KDFParams{}, nil, nil, nil, ErrExportTooShort
-	}
-	ciphertext = blob[off:]
-	return kdfParams, salt, nonce, ciphertext, nil
 }
 
 func appendUint16BE(b []byte, v uint16) []byte {

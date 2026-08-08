@@ -86,9 +86,9 @@ Commands:
   search              Search secrets
   delete              Delete a secret
   audit               Show audit log
-  token               Token management (create)
-  backup              Download snapshot archive (--out)
-  restore             Restore snapshot to data directory (--in, --data-dir, --force)
+  token               Token management (create|list|revoke)
+  backup              Download encrypted snapshot (--passphrase, --out)
+  restore             Restore snapshot (--in, --passphrase for v2, --data-dir, --force)
   export              Download encrypted export (--passphrase, --out)
   import              Import secrets from export (--passphrase, --in, --overwrite)
 
@@ -374,11 +374,15 @@ func cmdAudit(args []string) error {
 
 func cmdToken(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: vault token create --label <label>")
+		return fmt.Errorf("usage: vault token create|list|revoke ...")
 	}
 	switch args[0] {
 	case "create":
 		return cmdTokenCreate(args[1:])
+	case "list":
+		return cmdTokenList(args[1:])
+	case "revoke":
+		return cmdTokenRevoke(args[1:])
 	default:
 		return fmt.Errorf("unknown token subcommand %q", args[0])
 	}
@@ -387,8 +391,18 @@ func cmdToken(args []string) error {
 func cmdBackup(args []string) error {
 	fs := flag.NewFlagSet("backup", flag.ContinueOnError)
 	out := fs.String("out", "", "output file path")
+	passphrase := fs.String("passphrase", "", "snapshot encryption passphrase")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	pass := *passphrase
+	if pass == "" {
+		fmt.Fprint(os.Stderr, "Snapshot passphrase: ")
+		var err error
+		pass, err = readPassphrase()
+		if err != nil {
+			return err
+		}
 	}
 	outPath := *out
 	if outPath == "" {
@@ -402,14 +416,14 @@ func cmdBackup(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := c.DownloadSnapshot(f); err != nil {
+	if err := c.DownloadSnapshot(pass, f); err != nil {
 		f.Close()
 		return err
 	}
 	if err := f.Close(); err != nil {
 		return err
 	}
-	fmt.Printf("snapshot written to %s\n", outPath)
+	fmt.Printf("encrypted snapshot written to %s\n", outPath)
 	return nil
 }
 
@@ -418,13 +432,26 @@ func cmdRestore(args []string) error {
 	in := fs.String("in", "", "snapshot file path")
 	dataDir := fs.String("data-dir", "./data", "vault data directory")
 	force := fs.Bool("force", false, "overwrite existing vault.db")
+	passphrase := fs.String("passphrase", "", "snapshot passphrase (required for v2 encrypted snapshots)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *in == "" {
 		return fmt.Errorf("--in is required")
 	}
-	if err := backup.RestoreSnapshotFile(*in, *dataDir, *force); err != nil {
+	pass := *passphrase
+	raw, err := os.ReadFile(*in)
+	if err != nil {
+		return err
+	}
+	if backup.IsEncryptedSnapshot(raw) && pass == "" {
+		fmt.Fprint(os.Stderr, "Snapshot passphrase: ")
+		pass, err = readPassphrase()
+		if err != nil {
+			return err
+		}
+	}
+	if err := backup.RestoreSnapshotFile(*in, *dataDir, *force, pass); err != nil {
 		return err
 	}
 	fmt.Printf("snapshot restored to %s\n", *dataDir)
@@ -513,6 +540,7 @@ func cmdImport(args []string) error {
 func cmdTokenCreate(args []string) error {
 	fs := flag.NewFlagSet("token create", flag.ContinueOnError)
 	label := fs.String("label", "", "token label")
+	scope := fs.String("scope", "agent", "token scope: agent or admin")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -523,16 +551,54 @@ func cmdTokenCreate(args []string) error {
 	if err != nil {
 		return err
 	}
-	token, outLabel, err := c.CreateToken(*label)
+	token, outLabel, outScope, err := c.CreateToken(*label, *scope)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("token: %s\nlabel: %s\n", token, outLabel)
+	fmt.Printf("token: %s\nlabel: %s\nscope: %s\n", token, outLabel, outScope)
+	return nil
+}
+
+func cmdTokenList(args []string) error {
+	fs := flag.NewFlagSet("token list", flag.ContinueOnError)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	c, err := newClient()
+	if err != nil {
+		return err
+	}
+	tokens, err := c.ListTokens()
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(tokens)
+}
+
+func cmdTokenRevoke(args []string) error {
+	fs := flag.NewFlagSet("token revoke", flag.ContinueOnError)
+	id := fs.String("id", "", "token id")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" {
+		return fmt.Errorf("--id is required")
+	}
+	c, err := newClient()
+	if err != nil {
+		return err
+	}
+	if err := c.RevokeToken(*id); err != nil {
+		return err
+	}
+	fmt.Println("token revoked")
 	return nil
 }
 
 func defaultSnapshotFilename() string {
-	return fmt.Sprintf("agent-vault-%s.avs.tar.gz", timestampForFilename())
+	return fmt.Sprintf("agent-vault-%s.avs", timestampForFilename())
 }
 
 func defaultExportFilename() string {

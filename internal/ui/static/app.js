@@ -286,7 +286,12 @@ var AV = (function () {
 
     if (snapshotBtn) {
       snapshotBtn.addEventListener('click', function () {
-        downloadBackup('/ui/api/backup/snapshot', { method: 'POST' }, 'agent-vault-snapshot.avs.tar.gz', backupStatus);
+        var snapPass = window.prompt('Enter a passphrase for the encrypted snapshot (min 12 characters):');
+        if (!snapPass) return;
+        downloadBackup('/ui/api/backup/snapshot', {
+          method: 'POST',
+          body: JSON.stringify({ snapshot_passphrase: snapPass })
+        }, 'agent-vault-snapshot.avs', backupStatus);
       });
     }
 
@@ -711,6 +716,7 @@ var AV = (function () {
     var form = document.getElementById('settings-form');
     var hostnameEl = document.getElementById('public-hostname');
     var httpsEl = document.getElementById('https-enabled');
+    var allowlistEl = document.getElementById('ip-allowlist');
     var statusEl = document.getElementById('settings-status');
     if (!form) return;
 
@@ -734,6 +740,7 @@ var AV = (function () {
         if (!data) return;
         if (hostnameEl) hostnameEl.value = data.public_hostname || '';
         if (httpsEl) httpsEl.checked = !!data.https_enabled;
+        if (allowlistEl) allowlistEl.value = data.ip_allowlist || '';
         renderSettingsStatus(data);
       });
     }
@@ -747,7 +754,8 @@ var AV = (function () {
 
       var body = {
         public_hostname: hostnameEl ? hostnameEl.value.trim() : '',
-        https_enabled: httpsEl ? httpsEl.checked : false
+        https_enabled: httpsEl ? httpsEl.checked : false,
+        ip_allowlist: allowlistEl ? allowlistEl.value.trim() : ''
       };
 
       apiFetch('/ui/api/settings', {
@@ -761,6 +769,7 @@ var AV = (function () {
         if (result.ok) {
           if (hostnameEl) hostnameEl.value = result.data.public_hostname || '';
           if (httpsEl) httpsEl.checked = !!result.data.https_enabled;
+          if (allowlistEl) allowlistEl.value = result.data.ip_allowlist || '';
           renderSettingsStatus(result.data);
           showInfo(statusEl, 'Settings saved.');
           return;

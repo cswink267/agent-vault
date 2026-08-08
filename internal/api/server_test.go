@@ -223,6 +223,9 @@ func TestSearchAndTokens(t *testing.T) {
 	if tokResp["label"] != "claude" {
 		t.Fatalf("label: %s", tokResp["label"])
 	}
+	if tokResp["scope"] != "agent" {
+		t.Fatalf("scope: %s want agent", tokResp["scope"])
+	}
 }
 
 func TestUnlockLock(t *testing.T) {
@@ -516,24 +519,33 @@ func TestBackupSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("GET snapshot status %d want 405", resp.StatusCode)
+	}
+
+	resp, err = doAuth(http.MethodPost, ts.URL+"/v1/backup/snapshot", token, `{"snapshot_passphrase":"snapshot-passphrase"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		t.Fatalf("snapshot status %d body %s", resp.StatusCode, b)
 	}
 	ct := resp.Header.Get("Content-Type")
-	if ct != "application/gzip" && ct != "application/x-gtar" {
-		t.Fatalf("Content-Type %q want application/gzip or application/x-gtar", ct)
+	if ct != "application/octet-stream" {
+		t.Fatalf("Content-Type %q want application/octet-stream", ct)
 	}
 	cd := resp.Header.Get("Content-Disposition")
-	if !strings.Contains(cd, "attachment") || !strings.Contains(cd, "agent-vault-snapshot.avs.tar.gz") {
+	if !strings.Contains(cd, "attachment") || !strings.Contains(cd, "agent-vault-snapshot.avs") {
 		t.Fatalf("Content-Disposition %q", cd)
 	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(data) < 2 || data[0] != 0x1f || data[1] != 0x8b {
-		t.Fatalf("missing gzip magic: %x", data[:min(2, len(data))])
+	if len(data) < 4 || string(data[:4]) != "AVS2" {
+		t.Fatalf("missing AVS2 magic: %x", data[:min(4, len(data))])
 	}
 }
 

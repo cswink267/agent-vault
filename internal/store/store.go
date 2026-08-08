@@ -41,6 +41,7 @@ type TokenRow struct {
 	ID        string
 	Label     string
 	Hash      string
+	Scope     string
 	CreatedAt string
 }
 
@@ -79,6 +80,7 @@ CREATE TABLE IF NOT EXISTS tokens (
   id TEXT PRIMARY KEY,
   label TEXT NOT NULL,
   hash TEXT NOT NULL UNIQUE,
+  scope TEXT NOT NULL DEFAULT 'admin',
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS audit (
@@ -104,7 +106,42 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Store{db: db}, nil
+	st := &Store{db: db}
+	if err := st.migrateTokensScope(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return st, nil
+}
+
+func (s *Store) migrateTokensScope() error {
+	rows, err := s.db.Query(`PRAGMA table_info(tokens)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	hasScope := false
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "scope" {
+			hasScope = true
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if hasScope {
+		return nil
+	}
+	_, err = s.db.Exec(`ALTER TABLE tokens ADD COLUMN scope TEXT NOT NULL DEFAULT 'admin'`)
+	return err
 }
 
 func (s *Store) Close() error {
@@ -271,16 +308,20 @@ func (s *Store) SearchSecrets(q, tag, typ string) ([]SecretRow, error) {
 	return scanSecrets(rows)
 }
 
-func (s *Store) CreateToken(label, hash string) (TokenRow, error) {
+func (s *Store) CreateToken(label, hash, scope string) (TokenRow, error) {
+	if scope == "" {
+		scope = "admin"
+	}
 	row := TokenRow{
 		ID:        uuid.NewString(),
 		Label:     label,
 		Hash:      hash,
+		Scope:     scope,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 	_, err := s.db.Exec(`
-		INSERT INTO tokens (id, label, hash, created_at) VALUES (?, ?, ?, ?)
-	`, row.ID, row.Label, row.Hash, row.CreatedAt)
+		INSERT INTO tokens (id, label, hash, scope, created_at) VALUES (?, ?, ?, ?, ?)
+	`, row.ID, row.Label, row.Hash, row.Scope, row.CreatedAt)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return TokenRow{}, ErrConflict
@@ -291,7 +332,7 @@ func (s *Store) CreateToken(label, hash string) (TokenRow, error) {
 }
 
 func (s *Store) ListTokens() ([]TokenRow, error) {
-	rows, err := s.db.Query(`SELECT id, label, hash, created_at FROM tokens ORDER BY created_at`)
+	rows, err := s.db.Query(`SELECT id, label, hash, scope, created_at FROM tokens ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +340,7 @@ func (s *Store) ListTokens() ([]TokenRow, error) {
 	var out []TokenRow
 	for rows.Next() {
 		var r TokenRow
-		if err := rows.Scan(&r.ID, &r.Label, &r.Hash, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.Label, &r.Hash, &r.Scope, &r.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -309,15 +350,55 @@ func (s *Store) ListTokens() ([]TokenRow, error) {
 
 func (s *Store) FindTokenByHash(hash string) (TokenRow, bool, error) {
 	var r TokenRow
-	err := s.db.QueryRow(`SELECT id, label, hash, created_at FROM tokens WHERE hash = ?`, hash).
-		Scan(&r.ID, &r.Label, &r.Hash, &r.CreatedAt)
+	err := s.db.QueryRow(`SELECT id, label, hash, scope, created_at FROM tokens WHERE hash = ?`, hash).
+		Scan(&r.ID, &r.Label, &r.Hash, &r.Scope, &r.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return TokenRow{}, false, nil
 	}
 	if err != nil {
 		return TokenRow{}, false, err
 	}
+	if r.Scope == "" {
+		r.Scope = "admin"
+	}
 	return r, true, nil
+}
+
+func (s *Store) GetTokenByID(id string) (TokenRow, bool, error) {
+	var r TokenRow
+	err := s.db.QueryRow(`SELECT id, label, hash, scope, created_at FROM tokens WHERE id = ?`, id).
+		Scan(&r.ID, &r.Label, &r.Hash, &r.Scope, &r.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return TokenRow{}, false, nil
+	}
+	if err != nil {
+		return TokenRow{}, false, err
+	}
+	if r.Scope == "" {
+		r.Scope = "admin"
+	}
+	return r, true, nil
+}
+
+func (s *Store) DeleteTokenByID(id string) error {
+	res, err := s.db.Exec(`DELETE FROM tokens WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) CountTokensByScope(scope string) (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM tokens WHERE scope = ?`, scope).Scan(&n)
+	return n, err
 }
 
 func (s *Store) DeleteAllTokens() (int64, error) {

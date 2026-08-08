@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sync"
@@ -45,6 +46,8 @@ type Vault struct {
 	master         *crypto.MasterKey
 	dataDir        string
 	caddyConfigDir string
+	allowMu        sync.RWMutex
+	allowlist      []*net.IPNet
 }
 
 type InitResult struct {
@@ -137,7 +140,7 @@ func Init(dataDir, passphrase string) (*Vault, InitResult, error) {
 		st.Close()
 		return nil, InitResult{}, err
 	}
-	if _, err := st.CreateToken("root", hash); err != nil {
+	if _, err := st.CreateToken("root", hash, auth.ScopeAdmin); err != nil {
 		st.Close()
 		return nil, InitResult{}, err
 	}
@@ -150,6 +153,10 @@ func Init(dataDir, passphrase string) (*Vault, InitResult, error) {
 
 	m := master
 	v := &Vault{store: st, master: &m, dataDir: dataDir}
+	if err := v.loadAllowlist(); err != nil {
+		st.Close()
+		return nil, InitResult{}, err
+	}
 	return v, InitResult{Token: plaintext, UnsealKeyHex: unsealKeyHex}, nil
 }
 
@@ -159,7 +166,12 @@ func Open(dataDir string) (*Vault, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Vault{store: st, dataDir: dataDir}, nil
+	v := &Vault{store: st, dataDir: dataDir}
+	if err := v.loadAllowlist(); err != nil {
+		st.Close()
+		return nil, err
+	}
+	return v, nil
 }
 
 func (v *Vault) Sealed() bool {
@@ -263,7 +275,7 @@ func (v *Vault) revokeTokensAndMintRoot(actor string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err := v.store.CreateToken("root", hash); err != nil {
+	if _, err := v.store.CreateToken("root", hash, auth.ScopeAdmin); err != nil {
 		return "", err
 	}
 	if v.dataDir != "" {
@@ -626,30 +638,103 @@ func (v *Vault) Search(actorLabel, q, tag, typ string) ([]Secret, error) {
 	return out, nil
 }
 
-func (v *Vault) CreateToken(actorLabel, label string) (string, error) {
+type AuthIdentity struct {
+	ID    string
+	Label string
+	Scope string
+}
+
+type TokenInfo struct {
+	ID        string
+	Label     string
+	Scope     string
+	CreatedAt string
+}
+
+var ErrForbidden = errors.New("forbidden")
+var ErrLastAdmin = errors.New("cannot revoke the last admin token")
+
+func (v *Vault) CreateToken(actorLabel, label, scope string) (string, error) {
+	scope = auth.NormalizeScope(scope)
+	if err := auth.ValidateScope(scope); err != nil {
+		return "", err
+	}
+	if label == "" {
+		return "", errors.New("label is required")
+	}
 	plaintext, hash, err := auth.NewToken()
 	if err != nil {
 		return "", err
 	}
-	if _, err := v.store.CreateToken(label, hash); err != nil {
+	if _, err := v.store.CreateToken(label, hash, scope); err != nil {
+		return "", err
+	}
+	if err := v.store.AppendAudit(actorLabel, "token_create", label+":"+scope); err != nil {
 		return "", err
 	}
 	return plaintext, nil
 }
 
-func (v *Vault) Authenticate(plaintextToken string) (string, bool, error) {
+func (v *Vault) ListTokens(actorLabel string) ([]TokenInfo, error) {
+	rows, err := v.store.ListTokens()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TokenInfo, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, TokenInfo{
+			ID:        r.ID,
+			Label:     r.Label,
+			Scope:     r.Scope,
+			CreatedAt: r.CreatedAt,
+		})
+	}
+	if err := v.store.AppendAudit(actorLabel, "token_list", ""); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (v *Vault) RevokeToken(actorLabel, id string) error {
+	row, ok, err := v.store.GetTokenByID(id)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return store.ErrNotFound
+	}
+	if row.Scope == auth.ScopeAdmin {
+		n, err := v.store.CountTokensByScope(auth.ScopeAdmin)
+		if err != nil {
+			return err
+		}
+		if n <= 1 {
+			return ErrLastAdmin
+		}
+	}
+	if err := v.store.DeleteTokenByID(id); err != nil {
+		return err
+	}
+	return v.store.AppendAudit(actorLabel, "token_revoke", row.Label)
+}
+
+func (v *Vault) Authenticate(plaintextToken string) (AuthIdentity, bool, error) {
 	hash := auth.HashToken(plaintextToken)
 	row, ok, err := v.store.FindTokenByHash(hash)
 	if err != nil {
-		return "", false, err
+		return AuthIdentity{}, false, err
 	}
 	if !ok {
-		return "", false, nil
+		return AuthIdentity{}, false, nil
 	}
 	if !auth.VerifyToken(plaintextToken, row.Hash) {
-		return "", false, nil
+		return AuthIdentity{}, false, nil
 	}
-	return row.Label, true, nil
+	scope := row.Scope
+	if scope == "" {
+		scope = auth.ScopeAdmin
+	}
+	return AuthIdentity{ID: row.ID, Label: row.Label, Scope: scope}, true, nil
 }
 
 func (v *Vault) ListAudit(limit int) ([]store.AuditRow, error) {

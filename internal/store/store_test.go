@@ -42,7 +42,7 @@ func TestSecretCRUDAndSearch(t *testing.T) {
 	if err != nil || !ok || v != "abc" {
 		t.Fatalf("meta %v %v %q", err, ok, v)
 	}
-	tr, err := s.CreateToken("cursor", "hash1")
+	tr, err := s.CreateToken("cursor", "hash1", "agent")
 	if err != nil || tr.Label != "cursor" {
 		t.Fatal(err, tr)
 	}

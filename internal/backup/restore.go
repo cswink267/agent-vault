@@ -8,7 +8,7 @@ import (
 
 var ErrVaultDBExists = errors.New("vault.db already exists in data directory (use --force to overwrite)")
 
-func RestoreSnapshotFile(in, dataDir string, force bool) error {
+func RestoreSnapshotFile(in, dataDir string, force bool, passphrase string) error {
 	dbPath := filepath.Join(dataDir, "vault.db")
 	if _, err := os.Stat(dbPath); err == nil {
 		if !force {
@@ -18,11 +18,10 @@ func RestoreSnapshotFile(in, dataDir string, force bool) error {
 		return err
 	}
 
-	f, err := os.Open(in)
+	blob, err := os.ReadFile(in)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
 	stagingDir, err := os.MkdirTemp("", "agent-vault-restore-*")
 	if err != nil {
@@ -30,7 +29,7 @@ func RestoreSnapshotFile(in, dataDir string, force bool) error {
 	}
 	defer os.RemoveAll(stagingDir)
 
-	if _, err := ExtractSnapshotTarGz(f, stagingDir); err != nil {
+	if _, err := ExtractSnapshotAuto(blob, passphrase, stagingDir); err != nil {
 		return err
 	}
 	if err := installSnapshotMembers(stagingDir, dataDir, []string{"vault.db", "unseal.key"}); err != nil {

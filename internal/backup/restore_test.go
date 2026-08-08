@@ -25,7 +25,7 @@ func TestRestoreRefusesExistingDB(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := backup.RestoreSnapshotFile(snapPath, dataDir, false)
+	err := backup.RestoreSnapshotFile(snapPath, dataDir, false, "")
 	if err == nil {
 		t.Fatal("expected error when vault.db exists without force")
 	}
@@ -33,7 +33,7 @@ func TestRestoreRefusesExistingDB(t *testing.T) {
 		t.Fatalf("got %v, want %v", err, backup.ErrVaultDBExists)
 	}
 
-	if err := backup.RestoreSnapshotFile(snapPath, dataDir, true); err != nil {
+	if err := backup.RestoreSnapshotFile(snapPath, dataDir, true, ""); err != nil {
 		t.Fatalf("restore with force: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, "unseal.key")); err != nil {
@@ -59,7 +59,7 @@ func TestRestoreForceRemovesStaleRootToken(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := backup.RestoreSnapshotFile(snapPath, dataDir, true); err != nil {
+	if err := backup.RestoreSnapshotFile(snapPath, dataDir, true, ""); err != nil {
 		t.Fatalf("restore with force: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, "root.token")); !os.IsNotExist(err) {
@@ -91,7 +91,7 @@ func TestRestoreInvalidSnapshotDoesNotTrashDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := backup.RestoreSnapshotFile(snapPath, dataDir, true); err == nil {
+	if err := backup.RestoreSnapshotFile(snapPath, dataDir, true, ""); err == nil {
 		t.Fatal("expected restore error for invalid snapshot")
 	}
 	assertFileContent(t, filepath.Join(dataDir, "vault.db"), "existing-db")

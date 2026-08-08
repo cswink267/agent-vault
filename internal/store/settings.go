@@ -9,13 +9,15 @@ import (
 type Settings struct {
 	PublicHostname string
 	HTTPSEnabled   bool
+	IPAllowlist    string
 	UpdatedAt      string
 }
 
 const (
 	settingsKeyPublicHostname = "public_hostname"
-	settingsKeyHTTPSEnabled     = "https_enabled"
-	settingsKeyUpdatedAt        = "updated_at"
+	settingsKeyHTTPSEnabled   = "https_enabled"
+	settingsKeyIPAllowlist    = "ip_allowlist"
+	settingsKeyUpdatedAt      = "updated_at"
 )
 
 func (s *Store) GetSettings() (Settings, error) {
@@ -32,6 +34,12 @@ func (s *Store) GetSettings() (Settings, error) {
 		return Settings{}, err
 	}
 	out.HTTPSEnabled = enabled == "true"
+
+	allowlist, err := s.getSetting(settingsKeyIPAllowlist)
+	if err != nil {
+		return Settings{}, err
+	}
+	out.IPAllowlist = allowlist
 
 	updatedAt, err := s.getSetting(settingsKeyUpdatedAt)
 	if err != nil {
@@ -53,6 +61,7 @@ func (s *Store) PutSettings(in Settings) error {
 	entries := [][2]string{
 		{settingsKeyPublicHostname, in.PublicHostname},
 		{settingsKeyHTTPSEnabled, boolString(in.HTTPSEnabled)},
+		{settingsKeyIPAllowlist, in.IPAllowlist},
 		{settingsKeyUpdatedAt, updatedAt},
 	}
 	for _, kv := range entries {

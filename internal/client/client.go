@@ -169,20 +169,41 @@ func (c *Client) Audit(limit int) ([]AuditEntry, error) {
 	return out, nil
 }
 
-func (c *Client) CreateToken(label string) (token string, outLabel string, err error) {
-	body := map[string]string{"label": label}
+func (c *Client) CreateToken(label, scope string) (token string, outLabel string, outScope string, err error) {
+	body := map[string]string{"label": label, "scope": scope}
 	var resp struct {
 		Token string `json:"token"`
 		Label string `json:"label"`
+		Scope string `json:"scope"`
 	}
 	if err := c.doJSON(http.MethodPost, "/v1/tokens", true, body, &resp); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	return resp.Token, resp.Label, nil
+	return resp.Token, resp.Label, resp.Scope, nil
 }
 
-func (c *Client) DownloadSnapshot(w io.Writer) error {
-	return c.doDownload(http.MethodGet, "/v1/backup/snapshot", true, nil, w)
+func (c *Client) ListTokens() ([]TokenInfo, error) {
+	var out []TokenInfo
+	if err := c.doJSON(http.MethodGet, "/v1/tokens", true, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *Client) RevokeToken(id string) error {
+	return c.doJSON(http.MethodDelete, "/v1/tokens/"+id, true, nil, nil)
+}
+
+type TokenInfo struct {
+	ID        string `json:"id"`
+	Label     string `json:"label"`
+	Scope     string `json:"scope"`
+	CreatedAt string `json:"created_at"`
+}
+
+func (c *Client) DownloadSnapshot(snapshotPassphrase string, w io.Writer) error {
+	body := map[string]string{"snapshot_passphrase": snapshotPassphrase}
+	return c.doDownload(http.MethodPost, "/v1/backup/snapshot", true, body, w)
 }
 
 func (c *Client) DownloadExport(backupPassphrase string, w io.Writer) error {

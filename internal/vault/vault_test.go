@@ -45,6 +45,31 @@ func TestInitUnlockPutGetLock(t *testing.T) {
 	}
 }
 
+func TestVerifyPassphraseAndLogin(t *testing.T) {
+	dir := t.TempDir()
+	v, _, err := vault.Init(dir, "correct-horse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v.VerifyPassphrase("wrong"); err == nil {
+		t.Fatal("expected wrong passphrase to fail")
+	}
+	if err := v.VerifyPassphrase("correct-horse"); err != nil {
+		t.Fatal(err)
+	}
+	v.Lock()
+	if err := v.LoginWithPassphrase("correct-horse", "ui"); err != nil {
+		t.Fatal(err)
+	}
+	if v.Sealed() {
+		t.Fatal("expected unsealed after login")
+	}
+	// already unsealed: login still ok
+	if err := v.LoginWithPassphrase("correct-horse", "ui"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestUnlockWithWrongUnsealKeyFails(t *testing.T) {
 	dir := t.TempDir()
 	v, res, err := vault.Init(dir, "test-pass")

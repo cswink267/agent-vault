@@ -159,39 +159,69 @@ func (v *Vault) Sealed() bool {
 }
 
 func (v *Vault) UnlockWithPassphrase(passphrase string, actorLabel ...string) error {
-	saltHex, ok, err := v.store.GetMeta("salt")
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return errors.New("vault not initialized")
-	}
-	wrappedHex, ok, err := v.store.GetMeta("wrapped_master")
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return errors.New("vault not initialized")
-	}
-
-	salt, err := hex.DecodeString(saltHex)
-	if err != nil {
-		return err
-	}
-	wrapped, err := hex.DecodeString(wrappedHex)
-	if err != nil {
-		return err
-	}
-
-	kek, err := crypto.DeriveKey(passphrase, salt)
-	if err != nil {
-		return err
-	}
-	master, err := crypto.UnwrapKey(wrapped, kek)
+	master, err := v.unwrapMasterFromPassphrase(passphrase)
 	if err != nil {
 		return err
 	}
 	return v.UnlockWithKey(master, actorLabel...)
+}
+
+func (v *Vault) VerifyPassphrase(passphrase string) error {
+	master, err := v.unwrapMasterFromPassphrase(passphrase)
+	if err != nil {
+		return err
+	}
+	return v.verifyMaster(master)
+}
+
+func (v *Vault) LoginWithPassphrase(passphrase, actorLabel string) error {
+	master, err := v.unwrapMasterFromPassphrase(passphrase)
+	if err != nil {
+		return err
+	}
+	if err := v.verifyMaster(master); err != nil {
+		return err
+	}
+	if !v.Sealed() {
+		return nil
+	}
+	return v.UnlockWithKey(master, actorLabel)
+}
+
+func (v *Vault) unwrapMasterFromPassphrase(passphrase string) (crypto.MasterKey, error) {
+	saltHex, ok, err := v.store.GetMeta("salt")
+	if err != nil {
+		return crypto.MasterKey{}, err
+	}
+	if !ok {
+		return crypto.MasterKey{}, errors.New("vault not initialized")
+	}
+	wrappedHex, ok, err := v.store.GetMeta("wrapped_master")
+	if err != nil {
+		return crypto.MasterKey{}, err
+	}
+	if !ok {
+		return crypto.MasterKey{}, errors.New("vault not initialized")
+	}
+
+	salt, err := hex.DecodeString(saltHex)
+	if err != nil {
+		return crypto.MasterKey{}, err
+	}
+	wrapped, err := hex.DecodeString(wrappedHex)
+	if err != nil {
+		return crypto.MasterKey{}, err
+	}
+
+	kek, err := crypto.DeriveKey(passphrase, salt)
+	if err != nil {
+		return crypto.MasterKey{}, err
+	}
+	master, err := crypto.UnwrapKey(wrapped, kek)
+	if err != nil {
+		return crypto.MasterKey{}, err
+	}
+	return master, nil
 }
 
 func (v *Vault) UnlockWithKey(master crypto.MasterKey, actorLabel ...string) error {

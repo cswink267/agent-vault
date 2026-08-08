@@ -15,7 +15,7 @@ import (
 func setupTestTools(t *testing.T) *mcptools.Tools {
 	t.Helper()
 	dir := t.TempDir()
-	v, res, err := vault.Init(dir, "pass")
+	v, res, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}

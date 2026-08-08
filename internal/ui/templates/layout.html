@@ -1,0 +1,17 @@
+{{define "nav"}}
+<header class="site-header">
+  <div class="header-inner">
+    <a href="/ui/" class="brand">Agent Vault</a>
+    <nav class="nav-links">
+      <a href="/ui/">Secrets</a>
+      <a href="/ui/secrets/new">New</a>
+      <a href="/ui/audit">Audit</a>
+    </nav>
+    <div class="header-actions">
+      <span id="vault-status" class="status-badge" aria-live="polite"></span>
+      <button type="button" id="btn-lock" class="btn btn-secondary">Lock</button>
+      <button type="button" id="btn-logout" class="btn btn-secondary">Logout</button>
+    </div>
+  </div>
+</header>
+{{end}}

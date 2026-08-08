@@ -1,0 +1,37 @@
+{{define "audit"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Audit - Agent Vault</title>
+  <link rel="stylesheet" href="/ui/static/app.css">
+</head>
+<body>
+  {{template "nav" .}}
+  <main class="container">
+    <div class="page-header">
+      <h1>Audit log</h1>
+    </div>
+    <div id="audit-message" class="form-message" hidden></div>
+    <div class="table-wrap">
+      <table class="data-table" id="audit-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Actor</th>
+            <th>Action</th>
+            <th>Secret</th>
+          </tr>
+        </thead>
+        <tbody id="audit-body">
+          <tr><td colspan="4" class="text-muted">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+  <script src="/ui/static/app.js"></script>
+  <script>document.addEventListener('DOMContentLoaded', function() { AV.initAppChrome(); AV.initAuditPage(); });</script>
+</body>
+</html>
+{{end}}

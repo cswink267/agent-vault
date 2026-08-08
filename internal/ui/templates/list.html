@@ -1,0 +1,45 @@
+{{define "list"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Secrets - Agent Vault</title>
+  <link rel="stylesheet" href="/ui/static/app.css">
+</head>
+<body>
+  {{template "nav" .}}
+  <main class="container">
+    <div class="page-header">
+      <h1>Secrets</h1>
+      <a href="/ui/secrets/new" class="btn btn-primary">New secret</a>
+    </div>
+    <form id="search-form" class="search-bar">
+      <input type="search" id="search-q" name="q" placeholder="Search name or notes">
+      <input type="text" id="search-tag" name="tag" placeholder="Tag">
+      <input type="text" id="search-type" name="type" placeholder="Type">
+      <button type="submit" class="btn btn-secondary">Search</button>
+      <button type="button" id="search-clear" class="btn btn-secondary">Clear</button>
+    </form>
+    <div id="list-message" class="form-message" hidden></div>
+    <div class="table-wrap">
+      <table class="data-table" id="secrets-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Tags</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody id="secrets-body">
+          <tr><td colspan="4" class="text-muted">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+  <script src="/ui/static/app.js"></script>
+  <script>document.addEventListener('DOMContentLoaded', function() { AV.initAppChrome(); AV.initListPage(); });</script>
+</body>
+</html>
+{{end}}

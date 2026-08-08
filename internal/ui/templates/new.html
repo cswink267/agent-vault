@@ -1,0 +1,40 @@
+{{define "new"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>New Secret - Agent Vault</title>
+  <link rel="stylesheet" href="/ui/static/app.css">
+</head>
+<body>
+  {{template "nav" .}}
+  <main class="container container-narrow">
+    <div class="page-header">
+      <h1>New secret</h1>
+      <a href="/ui/" class="btn btn-secondary">Cancel</a>
+    </div>
+    <form id="new-form" class="form-card">
+      <label for="new-name">Name</label>
+      <input type="text" id="new-name" name="name" required>
+      <label for="new-type">Type</label>
+      <input type="text" id="new-type" name="type" value="api_key" required>
+      <label for="new-secret">Secret</label>
+      <input type="password" id="new-secret" name="secret" required>
+      <label for="new-username">Username</label>
+      <input type="text" id="new-username" name="username">
+      <label for="new-url">URL</label>
+      <input type="url" id="new-url" name="url">
+      <label for="new-tags">Tags (comma-separated)</label>
+      <input type="text" id="new-tags" name="tags">
+      <label for="new-notes">Notes</label>
+      <textarea id="new-notes" name="notes" rows="3"></textarea>
+      <p id="new-error" class="form-error" hidden></p>
+      <button type="submit" class="btn btn-primary">Create</button>
+    </form>
+  </main>
+  <script src="/ui/static/app.js"></script>
+  <script>document.addEventListener('DOMContentLoaded', function() { AV.initAppChrome(); AV.initNewPage(); });</script>
+</body>
+</html>
+{{end}}

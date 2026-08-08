@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net/http"
 	"strconv"
 	"strings"
@@ -42,6 +43,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /ui/api/lock", s.withSessionCSRF(s.handleLock))
 	mux.HandleFunc("POST /ui/api/unlock", s.withSessionCSRF(s.handleUnlock))
 	mux.HandleFunc("GET /ui/api/audit", s.withSession(s.handleAudit))
+
+	staticSub, _ := fs.Sub(staticFS, "static")
+	mux.Handle("GET /ui/static/{path...}", http.StripPrefix("/ui/static/", http.FileServer(http.FS(staticSub))))
+
+	mux.HandleFunc("GET /ui/login", s.handleLoginPage)
+	mux.HandleFunc("GET /ui", s.handleUIRoot)
+	mux.HandleFunc("GET /ui/", s.withPageAuth(s.handleListPage))
+	mux.HandleFunc("GET /ui/secrets", s.withPageAuth(s.handleListPage))
+	mux.HandleFunc("GET /ui/secrets/new", s.withPageAuth(s.handleNewPage))
+	mux.HandleFunc("GET /ui/s/{name}", s.withPageAuth(s.handleDetailPage))
+	mux.HandleFunc("GET /ui/audit", s.withPageAuth(s.handleAuditPage))
 	return mux
 }
 
@@ -247,6 +259,49 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) withPageAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := SessionIDFromRequest(r)
+		if id == "" || !s.Sessions.Get(id) {
+			http.Redirect(w, r, "/ui/login", http.StatusFound)
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (s *Server) renderPage(w http.ResponseWriter, name string, data interface{}) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := pageTemplates.ExecuteTemplate(w, name, data); err != nil {
+		http.Error(w, "template error", http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) handleUIRoot(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/ui/", http.StatusFound)
+}
+
+func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
+	s.renderPage(w, "login", nil)
+}
+
+func (s *Server) handleListPage(w http.ResponseWriter, r *http.Request) {
+	s.renderPage(w, "list", nil)
+}
+
+func (s *Server) handleNewPage(w http.ResponseWriter, r *http.Request) {
+	s.renderPage(w, "new", nil)
+}
+
+func (s *Server) handleDetailPage(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	s.renderPage(w, "detail", map[string]string{"Name": name})
+}
+
+func (s *Server) handleAuditPage(w http.ResponseWriter, r *http.Request) {
+	s.renderPage(w, "audit", nil)
 }
 
 func (s *Server) withSession(next http.HandlerFunc) http.HandlerFunc {

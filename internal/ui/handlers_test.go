@@ -210,6 +210,70 @@ func TestUIAPIRequiresSession(t *testing.T) {
 	}
 }
 
+func TestUIPagesAuth(t *testing.T) {
+	dir := t.TempDir()
+	v, _, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uiSrv := ui.New(v)
+	ts := httptest.NewServer(uiSrv.Handler())
+	defer ts.Close()
+
+	noRedirect := &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+
+	resp, err := noRedirect.Get(ts.URL + "/ui/secrets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("unauthenticated /ui/secrets status %d, want 302", resp.StatusCode)
+	}
+	loc := resp.Header.Get("Location")
+	if !strings.Contains(loc, "/ui/login") {
+		t.Fatalf("redirect location %q, want /ui/login", loc)
+	}
+
+	resp, err = http.Get(ts.URL + "/ui/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("login page status %d, want 200", resp.StatusCode)
+	}
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar}
+	resp, err = client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"pass"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	resp, err = client.Get(ts.URL + "/ui/secrets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("authenticated /ui/secrets status %d, want 200", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "Secrets") {
+		t.Fatalf("list page body missing 'Secrets': %s", body)
+	}
+}
+
 func csrfFromJar(t *testing.T, jar *cookiejar.Jar, baseURL string) string {
 	t.Helper()
 	u, err := http.NewRequest(http.MethodGet, baseURL+"/ui/login", nil)

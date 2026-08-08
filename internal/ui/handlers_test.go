@@ -686,6 +686,181 @@ func min(a, b int) int {
 	return b
 }
 
+func TestUISettingsAPI(t *testing.T) {
+	dir := t.TempDir()
+	v, _, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	caddyDir := t.TempDir()
+	v.SetCaddyConfigDir(caddyDir)
+
+	uiSrv := ui.New(v)
+	ts := httptest.NewServer(uiSrv.Handler())
+	defer ts.Close()
+
+	// unauthenticated GET → 401
+	resp, err := http.Get(ts.URL + "/ui/api/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated GET status %d want 401", resp.StatusCode)
+	}
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar}
+	resp, err = client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"pass"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	csrf := csrfFromJar(t, jar, ts.URL)
+	if csrf == "" {
+		t.Fatal("missing CSRF cookie after login")
+	}
+
+	// PUT without CSRF → 403
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/ui/api/settings", strings.NewReader(`{"public_hostname":"vault.example.com","https_enabled":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("PUT without csrf status %d body %s want 403", resp.StatusCode, b)
+	}
+
+	// PUT valid with CSRF → 200
+	req, _ = http.NewRequest(http.MethodPut, ts.URL+"/ui/api/settings", strings.NewReader(`{"public_hostname":"vault.example.com","https_enabled":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(ui.CSRFHeader, csrf)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("PUT valid status %d body %s", resp.StatusCode, b)
+	}
+	var putBody map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&putBody); err != nil {
+		t.Fatal(err)
+	}
+	if putBody["public_hostname"] != "vault.example.com" {
+		t.Fatalf("put public_hostname: %v", putBody["public_hostname"])
+	}
+	if putBody["https_enabled"] != true {
+		t.Fatalf("put https_enabled: %v", putBody["https_enabled"])
+	}
+	if putBody["caddyfile_status"] != "active" {
+		t.Fatalf("put caddyfile_status: %v", putBody["caddyfile_status"])
+	}
+
+	// GET reflects update
+	resp, err = client.Get(ts.URL + "/ui/api/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET status %d", resp.StatusCode)
+	}
+	var getBody map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&getBody); err != nil {
+		t.Fatal(err)
+	}
+	if getBody["public_hostname"] != "vault.example.com" {
+		t.Fatalf("get public_hostname: %v", getBody["public_hostname"])
+	}
+	if getBody["https_enabled"] != true {
+		t.Fatalf("get https_enabled: %v", getBody["https_enabled"])
+	}
+	if getBody["public_base_url"] != "https://vault.example.com" {
+		t.Fatalf("get public_base_url: %v", getBody["public_base_url"])
+	}
+
+	// invalid hostname → 400
+	req, _ = http.NewRequest(http.MethodPut, ts.URL+"/ui/api/settings", strings.NewReader(`{"public_hostname":"http://bad.example.com","https_enabled":false}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(ui.CSRFHeader, csrf)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("invalid hostname status %d body %s want 400", resp.StatusCode, b)
+	}
+}
+
+func TestUISettingsPage(t *testing.T) {
+	dir := t.TempDir()
+	v, _, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uiSrv := ui.New(v)
+	ts := httptest.NewServer(uiSrv.Handler())
+	defer ts.Close()
+
+	noRedirect := &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+
+	resp, err := noRedirect.Get(ts.URL + "/ui/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("unauthenticated /ui/settings status %d, want 302", resp.StatusCode)
+	}
+	loc := resp.Header.Get("Location")
+	if !strings.Contains(loc, "/ui/login") {
+		t.Fatalf("redirect location %q, want /ui/login", loc)
+	}
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar}
+	resp, err = client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"pass"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	resp, err = client.Get(ts.URL + "/ui/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("authenticated /ui/settings status %d, want 200", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(body)
+	if !strings.Contains(page, "Settings") {
+		t.Fatalf("settings page body missing 'Settings'")
+	}
+	if !strings.Contains(page, "DNS only") || !strings.Contains(page, "grey cloud") {
+		t.Fatalf("settings page missing Cloudflare checklist copy")
+	}
+}
+
 func csrfFromJar(t *testing.T, jar *cookiejar.Jar, baseURL string) string {
 	t.Helper()
 	u, err := http.NewRequest(http.MethodGet, baseURL+"/ui/login", nil)

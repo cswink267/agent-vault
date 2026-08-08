@@ -48,6 +48,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /ui/api/backup/snapshot", methodNotAllowed)
 	mux.HandleFunc("POST /ui/api/backup/snapshot", s.withSessionCSRF(s.handleBackupSnapshot))
 	mux.HandleFunc("POST /ui/api/backup/export", s.withSessionCSRF(s.handleBackupExport))
+	mux.HandleFunc("GET /ui/api/settings", s.withSession(s.handleGetSettings))
+	mux.HandleFunc("PUT /ui/api/settings", s.withSessionCSRF(s.handlePutSettings))
 
 	staticSub, _ := fs.Sub(staticFS, "static")
 	mux.Handle("GET /ui/static/{path...}", http.StripPrefix("/ui/static/", http.FileServer(http.FS(staticSub))))
@@ -59,6 +61,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /ui/secrets/new", s.withPageAuth(s.handleNewPage))
 	mux.HandleFunc("GET /ui/s/{name}", s.withPageAuth(s.handleDetailPage))
 	mux.HandleFunc("GET /ui/audit", s.withPageAuth(s.handleAuditPage))
+	mux.HandleFunc("GET /ui/settings", s.withPageAuth(s.handleSettingsPage))
 	return mux
 }
 
@@ -419,6 +422,50 @@ func (s *Server) handleDetailPage(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAuditPage(w http.ResponseWriter, r *http.Request) {
 	s.renderPage(w, "audit", nil)
+}
+
+func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
+	s.renderPage(w, "settings", nil)
+}
+
+func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
+	view, err := s.Vault.GetSettings()
+	if err != nil {
+		writeVaultError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, settingsViewToJSON(view))
+}
+
+func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		PublicHostname string `json:"public_hostname"`
+		HTTPSEnabled   bool   `json:"https_enabled"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+
+	view, err := s.Vault.UpdateSettings(body.PublicHostname, body.HTTPSEnabled)
+	if err != nil {
+		writeVaultError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, settingsViewToJSON(view))
+}
+
+func settingsViewToJSON(view vault.SettingsView) map[string]interface{} {
+	return map[string]interface{}{
+		"public_hostname":   view.PublicHostname,
+		"https_enabled":     view.HTTPSEnabled,
+		"updated_at":        view.UpdatedAt,
+		"private_base_url":  view.PrivateBaseURL,
+		"public_base_url":   view.PublicBaseURL,
+		"caddyfile_status":  view.CaddyfileStatus,
+		"apply_hint":        view.ApplyHint,
+		"caddy_config_path": view.CaddyConfigPath,
+	}
 }
 
 func methodNotAllowed(w http.ResponseWriter, r *http.Request) {

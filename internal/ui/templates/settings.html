@@ -1,0 +1,87 @@
+{{define "settings"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Settings - Agent Vault</title>
+  {{template "head" .}}
+  <link rel="stylesheet" href="/ui/static/app.css">
+</head>
+<body>
+  {{template "nav" .}}
+  <main class="container">
+    <div class="page-header">
+      <h1>Settings</h1>
+    </div>
+
+    <section class="settings-section" id="network-section">
+      <h2>Network &amp; HTTPS</h2>
+      <p class="text-muted">Configure a public hostname for HTTPS via Caddy. Private LAN access on port 8200 remains available.</p>
+
+      <form id="settings-form" class="form-card settings-form">
+        <label for="public-hostname">Public hostname</label>
+        <input type="text" id="public-hostname" name="public_hostname" placeholder="vault.example.com" autocomplete="off">
+
+        <label class="checkbox-label">
+          <input type="checkbox" id="https-enabled" name="https_enabled">
+          Enable HTTPS
+        </label>
+
+        <p id="settings-status" class="form-message" hidden></p>
+        <button type="submit" class="btn btn-primary">Save settings</button>
+      </form>
+
+      <div class="form-card settings-status-card">
+        <h3>Status</h3>
+        <dl class="settings-status-grid">
+          <div class="settings-status-row">
+            <dt>Private URL</dt>
+            <dd id="status-private-url">—</dd>
+          </div>
+          <div class="settings-status-row">
+            <dt>Public URL</dt>
+            <dd id="status-public-url">—</dd>
+          </div>
+          <div class="settings-status-row">
+            <dt>Caddyfile</dt>
+            <dd id="status-caddyfile">—</dd>
+          </div>
+          <div class="settings-status-row">
+            <dt>Last updated</dt>
+            <dd id="status-updated">—</dd>
+          </div>
+        </dl>
+        <div id="apply-hint-block" class="apply-hint" hidden>
+          <p class="text-muted">After saving, apply the HTTPS profile on your host:</p>
+          <pre id="apply-hint" class="apply-hint-code"></pre>
+        </div>
+      </div>
+
+      <details class="form-card cloudflare-checklist" id="cloudflare-checklist">
+        <summary>Cloudflare DNS setup (grey cloud)</summary>
+        <ol class="checklist">
+          <li>In Cloudflare DNS, add an <strong>A</strong> (IPv4) and/or <strong>AAAA</strong> (IPv6) record for your subdomain pointing to this host&rsquo;s public IP.</li>
+          <li>Set proxy status to <strong>DNS only</strong> (<strong>grey cloud</strong>), not Proxied (orange cloud).</li>
+          <li>Ensure your firewall/router forwards ports <strong>80</strong> and <strong>443</strong> to the host running Compose.</li>
+          <li>Wait for DNS to resolve publicly (<code>dig</code> or Cloudflare dashboard).</li>
+          <li>Save Settings with <strong>Enable HTTPS</strong> checked, then run the Compose command shown in the apply hint below.</li>
+        </ol>
+      </details>
+    </section>
+
+    <section class="settings-section settings-placeholder" id="security-section">
+      <h2>Security</h2>
+      <p class="text-muted">Change passphrase and rotate master key controls will be available here.</p>
+    </section>
+
+    <section class="settings-section settings-placeholder" id="backup-section">
+      <h2>Backup</h2>
+      <p class="text-muted">Snapshot and export download controls will be available here.</p>
+    </section>
+  </main>
+  <script src="/ui/static/app.js"></script>
+  <script>document.addEventListener('DOMContentLoaded', function() { AV.initAppChrome(); AV.initSettingsPage(); });</script>
+</body>
+</html>
+{{end}}

@@ -60,6 +60,7 @@ func ExtractSnapshotTarGz(r io.Reader, destDir string) (Manifest, error) {
 	tr := tar.NewReader(gr)
 	var manifest Manifest
 	var manifestPath string
+	var haveVaultDB, haveUnsealKey, haveManifest bool
 
 	for {
 		hdr, err := tr.Next()
@@ -71,7 +72,12 @@ func ExtractSnapshotTarGz(r io.Reader, destDir string) (Manifest, error) {
 		}
 
 		switch hdr.Name {
-		case "vault.db", "unseal.key", "manifest.json":
+		case "vault.db":
+			haveVaultDB = true
+		case "unseal.key":
+			haveUnsealKey = true
+		case "manifest.json":
+			haveManifest = true
 		default:
 			return Manifest{}, fmt.Errorf("unexpected tar member: %s", hdr.Name)
 		}
@@ -101,7 +107,13 @@ func ExtractSnapshotTarGz(r io.Reader, destDir string) (Manifest, error) {
 		}
 	}
 
-	if manifestPath == "" {
+	if !haveVaultDB {
+		return Manifest{}, fmt.Errorf("missing vault.db")
+	}
+	if !haveUnsealKey {
+		return Manifest{}, fmt.Errorf("missing unseal.key")
+	}
+	if !haveManifest || manifestPath == "" {
 		return Manifest{}, fmt.Errorf("missing manifest.json")
 	}
 

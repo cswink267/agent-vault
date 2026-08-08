@@ -1,6 +1,7 @@
 package vault_test
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/cswink267/agent-vault/internal/backup"
 	"github.com/cswink267/agent-vault/internal/crypto"
 	"github.com/cswink267/agent-vault/internal/vault"
 )
@@ -275,5 +277,102 @@ func TestUnlockWithWrongUnsealKeyFails(t *testing.T) {
 	}
 	if v.Sealed() {
 		t.Fatal("correct unseal key should unseal vault")
+	}
+}
+
+func TestSnapshotRestoreAndExportImport(t *testing.T) {
+	dir := t.TempDir()
+	v, _, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Put("test", vault.Secret{
+		Name:   "openai.api_key",
+		Type:   "api_key",
+		Secret: "sk-test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	if err := v.WriteSnapshot("test", &buf); err != nil {
+		t.Fatal(err)
+	}
+
+	destDir := filepath.Join(dir, "restored")
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backup.ExtractSnapshotTarGz(&buf, destDir); err != nil {
+		t.Fatal(err)
+	}
+
+	v2, err := vault.Open(destDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err := v2.TryAutoUnseal(filepath.Join(destDir, "unseal.key"))
+	if err != nil || !ok {
+		t.Fatalf("auto-unseal: ok=%v err=%v", ok, err)
+	}
+	got, err := v2.Get("test", "openai.api_key", true)
+	if err != nil || got.Secret != "sk-test" {
+		t.Fatalf("restored secret: %+v err %v", got, err)
+	}
+
+	blob, err := v.BuildExport("test", "backup-pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := backup.OpenExport("backup-pass", blob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Name != "openai.api_key" || records[0].Secret != "sk-test" {
+		t.Fatalf("export records: %+v", records)
+	}
+
+	audit, err := v.ListAudit(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawSnapshot, sawExport bool
+	for _, row := range audit {
+		if row.Action == "backup_snapshot" {
+			sawSnapshot = true
+		}
+		if row.Action == "backup_export" {
+			sawExport = true
+		}
+	}
+	if !sawSnapshot || !sawExport {
+		t.Fatalf("audit: snapshot=%v export=%v rows=%+v", sawSnapshot, sawExport, audit)
+	}
+}
+
+func TestBuildExportWhileSealed(t *testing.T) {
+	dir := t.TempDir()
+	v, _, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.Lock()
+	if _, err := v.BuildExport("test", "backup-pass"); !errors.Is(err, vault.ErrSealed) {
+		t.Fatalf("want ErrSealed, got %v", err)
+	}
+}
+
+func TestWriteSnapshotMissingUnsealKey(t *testing.T) {
+	dir := t.TempDir()
+	v, _, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, "unseal.key")); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := v.WriteSnapshot("test", &buf); err == nil {
+		t.Fatal("expected error when unseal.key missing")
 	}
 }

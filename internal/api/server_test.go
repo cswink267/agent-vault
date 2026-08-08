@@ -15,7 +15,7 @@ import (
 
 func TestHealthAndSecretLifecycle(t *testing.T) {
 	dir := t.TempDir()
-	v, res, err := vault.Init(dir, "pass")
+	v, res, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,8 +38,11 @@ func TestHealthAndSecretLifecycle(t *testing.T) {
 	if health["ok"] != true {
 		t.Fatalf("health ok: %v", health["ok"])
 	}
-	if health["sealed"] != false {
-		t.Fatalf("health sealed: %v", health["sealed"])
+	if _, hasSealed := health["sealed"]; hasSealed {
+		t.Fatal("unauthenticated /health must not expose sealed state")
+	}
+	if resp.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatal("missing security header X-Content-Type-Options")
 	}
 
 	body := `{"name":"k","type":"api_key","secret":"abc","tags":["t"]}`
@@ -89,7 +92,7 @@ func TestHealthAndSecretLifecycle(t *testing.T) {
 
 func TestUIMountedWithoutBearer(t *testing.T) {
 	dir := t.TempDir()
-	v, _, err := vault.Init(dir, "pass")
+	v, _, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +121,7 @@ func TestUIMountedWithoutBearer(t *testing.T) {
 
 func TestUISessionCannotAccessV1Secrets(t *testing.T) {
 	dir := t.TempDir()
-	v, _, err := vault.Init(dir, "pass")
+	v, _, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +135,7 @@ func TestUISessionCannotAccessV1Secrets(t *testing.T) {
 	}
 	client := &http.Client{Jar: jar}
 
-	resp, err := client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"pass"}`))
+	resp, err := client.Post(ts.URL+"/ui/login", "application/json", strings.NewReader(`{"passphrase":"test-passphrase"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +157,7 @@ func TestUISessionCannotAccessV1Secrets(t *testing.T) {
 
 func TestUnauthorized(t *testing.T) {
 	dir := t.TempDir()
-	v, _, err := vault.Init(dir, "pass")
+	v, _, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +177,7 @@ func TestUnauthorized(t *testing.T) {
 
 func TestSearchAndTokens(t *testing.T) {
 	dir := t.TempDir()
-	v, res, err := vault.Init(dir, "pass")
+	v, res, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +227,7 @@ func TestSearchAndTokens(t *testing.T) {
 
 func TestUnlockLock(t *testing.T) {
 	dir := t.TempDir()
-	v, res, err := vault.Init(dir, "pass")
+	v, res, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +237,7 @@ func TestUnlockLock(t *testing.T) {
 	defer ts.Close()
 
 	token := res.Token
-	resp, err := doAuth(http.MethodPost, ts.URL+"/v1/unlock", token, `{"passphrase":"pass"}`)
+	resp, err := doAuth(http.MethodPost, ts.URL+"/v1/unlock", token, `{"passphrase":"test-passphrase"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,17 +266,8 @@ func TestUnlockLock(t *testing.T) {
 		t.Fatalf("lock status %d", resp.StatusCode)
 	}
 
-	resp, err = http.Get(ts.URL + "/health")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	var health map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
-		t.Fatal(err)
-	}
-	if health["sealed"] != true {
-		t.Fatalf("want sealed after lock")
+	if !v.Sealed() {
+		t.Fatal("want sealed after lock")
 	}
 
 	resp, err = doAuth(http.MethodGet, ts.URL+"/v1/audit?limit=20", token, "")
@@ -293,7 +287,7 @@ func TestUnlockLock(t *testing.T) {
 
 func TestChangePassphraseAPI(t *testing.T) {
 	dir := t.TempDir()
-	v, res, err := vault.Init(dir, "old-pass")
+	v, res, err := vault.Init(dir, "old-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +296,7 @@ func TestChangePassphraseAPI(t *testing.T) {
 	defer ts.Close()
 	token := res.Token
 
-	resp, err := doAuth(http.MethodPost, ts.URL+"/v1/change-passphrase", token, `{"old_passphrase":"wrong","new_passphrase":"new-pass"}`)
+	resp, err := doAuth(http.MethodPost, ts.URL+"/v1/change-passphrase", token, `{"old_passphrase":"wrong","new_passphrase":"new-passphrase"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +306,7 @@ func TestChangePassphraseAPI(t *testing.T) {
 		t.Fatalf("wrong old status %d body %s", resp.StatusCode, b)
 	}
 
-	resp, err = doAuth(http.MethodPost, ts.URL+"/v1/change-passphrase", token, `{"old_passphrase":"old-pass","new_passphrase":"new-pass"}`)
+	resp, err = doAuth(http.MethodPost, ts.URL+"/v1/change-passphrase", token, `{"old_passphrase":"old-passphrase","new_passphrase":"new-passphrase"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +335,7 @@ func TestChangePassphraseAPI(t *testing.T) {
 	}
 
 	v.Lock()
-	resp, err = doAuth(http.MethodPost, ts.URL+"/v1/unlock", newToken, `{"passphrase":"new-pass"}`)
+	resp, err = doAuth(http.MethodPost, ts.URL+"/v1/unlock", newToken, `{"passphrase":"new-passphrase"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +346,7 @@ func TestChangePassphraseAPI(t *testing.T) {
 	}
 
 	v.Lock()
-	resp, err = doAuth(http.MethodPost, ts.URL+"/v1/change-passphrase", newToken, `{"old_passphrase":"new-pass","new_passphrase":"newer"}`)
+	resp, err = doAuth(http.MethodPost, ts.URL+"/v1/change-passphrase", newToken, `{"old_passphrase":"new-passphrase","new_passphrase":"newer-passphrase"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +359,7 @@ func TestChangePassphraseAPI(t *testing.T) {
 
 func TestRotateMasterAPI(t *testing.T) {
 	dir := t.TempDir()
-	v, res, err := vault.Init(dir, "pass")
+	v, res, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +380,7 @@ func TestRotateMasterAPI(t *testing.T) {
 		t.Fatalf("wrong pass status %d body %s", resp.StatusCode, b)
 	}
 
-	resp, err = doAuth(http.MethodPost, ts.URL+"/v1/rotate-master", res.Token, `{"passphrase":"pass"}`)
+	resp, err = doAuth(http.MethodPost, ts.URL+"/v1/rotate-master", res.Token, `{"passphrase":"test-passphrase"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +411,7 @@ func TestRotateMasterAPI(t *testing.T) {
 
 func TestCreateSecretConflictDoesNotOverwrite(t *testing.T) {
 	dir := t.TempDir()
-	v, res, err := vault.Init(dir, "pass")
+	v, res, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -498,7 +492,7 @@ func assertAuditActions(t *testing.T, rows []map[string]interface{}, actions ...
 
 func TestBackupSnapshot(t *testing.T) {
 	dir := t.TempDir()
-	v, res, err := vault.Init(dir, "pass")
+	v, res, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -545,7 +539,7 @@ func TestBackupSnapshot(t *testing.T) {
 
 func TestBackupExport(t *testing.T) {
 	dir := t.TempDir()
-	v, res, err := vault.Init(dir, "pass")
+	v, res, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -556,7 +550,7 @@ func TestBackupExport(t *testing.T) {
 
 	token := res.Token
 
-	resp, err := doAuth(http.MethodPost, ts.URL+"/v1/backup/export", token, `{"backup_passphrase":"bp"}`)
+	resp, err := doAuth(http.MethodPost, ts.URL+"/v1/backup/export", token, `{"backup_passphrase":"backup-passphrase"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -582,7 +576,7 @@ func TestBackupExport(t *testing.T) {
 	}
 
 	v.Lock()
-	resp, err = doAuth(http.MethodPost, ts.URL+"/v1/backup/export", token, `{"backup_passphrase":"bp"}`)
+	resp, err = doAuth(http.MethodPost, ts.URL+"/v1/backup/export", token, `{"backup_passphrase":"backup-passphrase"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -592,7 +586,7 @@ func TestBackupExport(t *testing.T) {
 		t.Fatalf("sealed export status %d body %s", resp.StatusCode, b)
 	}
 
-	resp, err = http.Post(ts.URL+"/v1/backup/export", "application/json", strings.NewReader(`{"backup_passphrase":"bp"}`))
+	resp, err = http.Post(ts.URL+"/v1/backup/export", "application/json", strings.NewReader(`{"backup_passphrase":"backup-passphrase"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

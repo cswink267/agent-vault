@@ -33,7 +33,7 @@ func (v *Vault) GetSettings() (SettingsView, error) {
 	return buildSettingsView(st, v.caddyConfigDir), nil
 }
 
-func (v *Vault) UpdateSettings(publicHostname string, httpsEnabled bool) (SettingsView, error) {
+func (v *Vault) UpdateSettings(publicHostname string, httpsEnabled bool, actorLabel ...string) (SettingsView, error) {
 	if err := settings.ValidateHostname(publicHostname); err != nil {
 		return SettingsView{}, err
 	}
@@ -53,7 +53,11 @@ func (v *Vault) UpdateSettings(publicHostname string, httpsEnabled bool) (Settin
 		}
 	}
 
-	if err := v.store.AppendAudit("", "settings_update", ""); err != nil {
+	actor := ""
+	if len(actorLabel) > 0 {
+		actor = actorLabel[0]
+	}
+	if err := v.store.AppendAudit(actor, "settings_update", ""); err != nil {
 		return SettingsView{}, err
 	}
 

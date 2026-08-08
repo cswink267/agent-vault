@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/cswink267/agent-vault/internal/api"
 	"github.com/cswink267/agent-vault/internal/vault"
@@ -13,6 +14,7 @@ import (
 
 func main() {
 	port := envOr("PORT", "8080")
+	bind := envOr("AGENT_VAULT_BIND", "0.0.0.0")
 	dataDir := envOr("AGENT_VAULT_DATA_DIR", "/data")
 	unsealKeyPath := envOr("AGENT_VAULT_UNSEAL_KEY", filepath.Join(dataDir, "unseal.key"))
 
@@ -33,9 +35,18 @@ func main() {
 	}
 
 	srv := api.New(v)
-	addr := fmt.Sprintf("0.0.0.0:%s", port)
+	addr := fmt.Sprintf("%s:%s", bind, port)
+	httpSrv := &http.Server{
+		Addr:              addr,
+		Handler:           srv.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      120 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
 	log.Printf("listening on %s", addr)
-	if err := http.ListenAndServe(addr, srv.Handler()); err != nil {
+	if err := httpSrv.ListenAndServe(); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
 }
@@ -50,11 +61,11 @@ func openOrInit(dataDir string) (*vault.Vault, error) {
 		if os.Getenv("AGENT_VAULT_INIT") != "1" {
 			return nil, fmt.Errorf("vault database not found at %s: set AGENT_VAULT_INIT=1 with AGENT_VAULT_PASSPHRASE to initialize", dbPath)
 		}
-		v, res, err := vault.Init(dataDir, passphrase)
+		v, _, err := vault.Init(dataDir, passphrase)
 		if err != nil {
 			return nil, err
 		}
-		log.Printf("WARNING: vault initialized; root token (save now, shown once): %s", res.Token)
+		log.Printf("vault initialized; root token written to %s (mode 0600) — read once and delete the file", filepath.Join(dataDir, "root.token"))
 		return v, nil
 	}
 	return vault.Open(dataDir)

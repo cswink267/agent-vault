@@ -16,8 +16,12 @@ import (
 
 	"github.com/cswink267/agent-vault/internal/auth"
 	"github.com/cswink267/agent-vault/internal/crypto"
+	"github.com/cswink267/agent-vault/internal/security"
 	"github.com/cswink267/agent-vault/internal/store"
 )
+
+// kdfGate bounds concurrent Argon2 derivations (login/unlock/change).
+var kdfGate = security.NewKDFGate(2)
 
 var ErrSealed = errors.New("vault is sealed")
 var ErrInvalidMasterKey = errors.New("unseal key does not match this vault")
@@ -64,6 +68,9 @@ type Secret struct {
 }
 
 func Init(dataDir, passphrase string) (*Vault, InitResult, error) {
+	if err := security.ValidatePassphrase(passphrase); err != nil {
+		return nil, InitResult{}, err
+	}
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, InitResult{}, err
 	}
@@ -90,7 +97,7 @@ func Init(dataDir, passphrase string) (*Vault, InitResult, error) {
 		st.Close()
 		return nil, InitResult{}, err
 	}
-	kek, err := crypto.DeriveKey(passphrase, salt)
+	kek, err := deriveKEK(passphrase, salt)
 	if err != nil {
 		st.Close()
 		return nil, InitResult{}, err
@@ -195,8 +202,8 @@ func (v *Vault) LoginWithPassphrase(passphrase, actorLabel string) error {
 // Requires an unsealed vault. Does not modify unseal.key, secrets, or the in-memory master.
 // All bearer tokens are revoked and a fresh root token is minted (returned once).
 func (v *Vault) ChangePassphrase(oldPass, newPass, actorLabel string) (string, error) {
-	if newPass == "" {
-		return "", errors.New("new passphrase is required")
+	if err := security.ValidatePassphrase(newPass); err != nil {
+		return "", err
 	}
 	if newPass == oldPass {
 		return "", errors.New("new passphrase must differ from old passphrase")
@@ -219,7 +226,7 @@ func (v *Vault) ChangePassphrase(oldPass, newPass, actorLabel string) (string, e
 	if err != nil {
 		return "", err
 	}
-	kek, err := crypto.DeriveKey(newPass, salt)
+	kek, err := deriveKEK(newPass, salt)
 	if err != nil {
 		return "", err
 	}
@@ -318,7 +325,7 @@ func (v *Vault) RotateMasterKey(passphrase, actorLabel string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	kek, err := crypto.DeriveKey(passphrase, salt)
+	kek, err := deriveKEK(passphrase, salt)
 	if err != nil {
 		return "", err
 	}
@@ -398,15 +405,17 @@ func (v *Vault) unwrapMasterFromPassphrase(passphrase string) (crypto.MasterKey,
 		return crypto.MasterKey{}, err
 	}
 
-	kek, err := crypto.DeriveKey(passphrase, salt)
+	kek, err := deriveKEK(passphrase, salt)
 	if err != nil {
 		return crypto.MasterKey{}, err
 	}
-	master, err := crypto.UnwrapKey(wrapped, kek)
-	if err != nil {
-		return crypto.MasterKey{}, err
-	}
-	return master, nil
+	return crypto.UnwrapKey(wrapped, kek)
+}
+
+func deriveKEK(passphrase string, salt []byte) (crypto.MasterKey, error) {
+	kdfGate.Acquire()
+	defer kdfGate.Release()
+	return crypto.DeriveKey(passphrase, salt)
 }
 
 func (v *Vault) UnlockWithKey(master crypto.MasterKey, actorLabel ...string) error {

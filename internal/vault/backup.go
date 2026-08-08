@@ -8,9 +8,13 @@ import (
 	"time"
 
 	"github.com/cswink267/agent-vault/internal/backup"
+	"github.com/cswink267/agent-vault/internal/security"
 )
 
 func (v *Vault) WriteSnapshot(actor string, w io.Writer) error {
+	if v.Sealed() {
+		return ErrSealed
+	}
 	unsealPath := filepath.Join(v.dataDir, "unseal.key")
 	if _, err := os.Stat(unsealPath); err != nil {
 		if os.IsNotExist(err) {
@@ -52,6 +56,9 @@ func (v *Vault) WriteSnapshot(actor string, w io.Writer) error {
 func (v *Vault) BuildExport(actor, backupPassphrase string) ([]byte, error) {
 	if v.Sealed() {
 		return nil, ErrSealed
+	}
+	if err := security.ValidatePassphrase(backupPassphrase); err != nil {
+		return nil, err
 	}
 
 	secrets, err := v.List(actor)

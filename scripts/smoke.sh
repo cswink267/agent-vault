@@ -18,7 +18,7 @@ trap cleanup EXIT
 go build -o "$BIN_DIR/vault-server" ./cmd/vault-server
 go build -o "$BIN_DIR/vault" ./cmd/vault
 
-"$BIN_DIR/vault" init --data-dir "$DATA_DIR" --passphrase 'smoke-pass' >/dev/null
+"$BIN_DIR/vault" init --data-dir "$DATA_DIR" --passphrase 'smoke-passphrase' >/dev/null
 
 TOKEN=$(cat "$DATA_DIR/root.token")
 PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("",0)); print(s.getsockname()[1]); s.close()')
@@ -29,12 +29,12 @@ AGENT_VAULT_DATA_DIR="$DATA_DIR" PORT="$PORT" "$BIN_DIR/vault-server" &
 PID=$!
 
 for _ in $(seq 1 30); do
-  if curl -sf "$AGENT_VAULT_URL/health" | grep -q '"sealed":false'; then
+  if curl -sf "$AGENT_VAULT_URL/health" | grep -q '"ok":true'; then
     break
   fi
   sleep 0.2
 done
-curl -sf "$AGENT_VAULT_URL/health" | grep -q '"sealed":false'
+curl -sf "$AGENT_VAULT_URL/health" | grep -q '"ok":true'
 
 "$BIN_DIR/vault" set \
   --name smoke.test \

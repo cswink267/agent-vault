@@ -17,7 +17,7 @@ import (
 
 func TestInitUnlockPutGetLock(t *testing.T) {
 	dir := t.TempDir()
-	v, res, err := vault.Init(dir, "test-pass")
+	v, res, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,32 +51,32 @@ func TestInitUnlockPutGetLock(t *testing.T) {
 
 func TestVerifyPassphraseAndLogin(t *testing.T) {
 	dir := t.TempDir()
-	v, _, err := vault.Init(dir, "correct-horse")
+	v, _, err := vault.Init(dir, "correct-horse-battery")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := v.VerifyPassphrase("wrong"); err == nil {
 		t.Fatal("expected wrong passphrase to fail")
 	}
-	if err := v.VerifyPassphrase("correct-horse"); err != nil {
+	if err := v.VerifyPassphrase("correct-horse-battery"); err != nil {
 		t.Fatal(err)
 	}
 	v.Lock()
-	if err := v.LoginWithPassphrase("correct-horse", "ui"); err != nil {
+	if err := v.LoginWithPassphrase("correct-horse-battery", "ui"); err != nil {
 		t.Fatal(err)
 	}
 	if v.Sealed() {
 		t.Fatal("expected unsealed after login")
 	}
 	// already unsealed: login still ok
-	if err := v.LoginWithPassphrase("correct-horse", "ui"); err != nil {
+	if err := v.LoginWithPassphrase("correct-horse-battery", "ui"); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestChangePassphrase(t *testing.T) {
 	dir := t.TempDir()
-	v, res, err := vault.Init(dir, "old-pass")
+	v, res, err := vault.Init(dir, "old-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestChangePassphrase(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	newRoot, err := v.ChangePassphrase("old-pass", "new-pass", "test")
+	newRoot, err := v.ChangePassphrase("old-passphrase", "new-passphrase", "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,10 +117,10 @@ func TestChangePassphrase(t *testing.T) {
 		t.Fatalf("root.token mismatch")
 	}
 
-	if err := v.VerifyPassphrase("old-pass"); err == nil {
+	if err := v.VerifyPassphrase("old-passphrase"); err == nil {
 		t.Fatal("old passphrase should fail after change")
 	}
-	if err := v.VerifyPassphrase("new-pass"); err != nil {
+	if err := v.VerifyPassphrase("new-passphrase"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -134,45 +134,45 @@ func TestChangePassphrase(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("unseal.key should still work: ok=%v err=%v", ok, err)
 	}
-	if err := v.UnlockWithPassphrase("new-pass"); err != nil {
+	if err := v.UnlockWithPassphrase("new-passphrase"); err != nil {
 		t.Fatal(err)
 	}
 	v.Lock()
-	if err := v.UnlockWithPassphrase("old-pass"); err == nil {
+	if err := v.UnlockWithPassphrase("old-passphrase"); err == nil {
 		t.Fatal("old passphrase unlock should fail")
 	}
 
 	// wrong old
-	v2, _, err := vault.Init(t.TempDir(), "correct")
+	v2, _, err := vault.Init(t.TempDir(), "correct-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v2.ChangePassphrase("wrong", "newer", "test"); !errors.Is(err, vault.ErrInvalidMasterKey) {
+	if _, err := v2.ChangePassphrase("wrong-passphrase", "newer-passphrase", "test"); !errors.Is(err, vault.ErrInvalidMasterKey) {
 		t.Fatalf("wrong old: got %v want %v", err, vault.ErrInvalidMasterKey)
 	}
 
 	// sealed
 	v2.Lock()
-	if _, err := v2.ChangePassphrase("correct", "newer", "test"); !errors.Is(err, vault.ErrSealed) {
+	if _, err := v2.ChangePassphrase("correct-passphrase", "newer-passphrase", "test"); !errors.Is(err, vault.ErrSealed) {
 		t.Fatalf("sealed: got %v want %v", err, vault.ErrSealed)
 	}
 
 	// empty / same
-	v3, _, err := vault.Init(t.TempDir(), "same-pass")
+	v3, _, err := vault.Init(t.TempDir(), "same-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v3.ChangePassphrase("same-pass", "", "test"); err == nil {
+	if _, err := v3.ChangePassphrase("same-passphrase", "", "test"); err == nil {
 		t.Fatal("empty new should fail")
 	}
-	if _, err := v3.ChangePassphrase("same-pass", "same-pass", "test"); err == nil {
+	if _, err := v3.ChangePassphrase("same-passphrase", "same-passphrase", "test"); err == nil {
 		t.Fatal("same new should fail")
 	}
 }
 
 func TestRotateMasterKey(t *testing.T) {
 	dir := t.TempDir()
-	v, res, err := vault.Init(dir, "pass")
+	v, res, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestRotateMasterKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	newToken, err := v.RotateMasterKey("pass", "test")
+	newToken, err := v.RotateMasterKey("test-passphrase", "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,26 +227,33 @@ func TestRotateMasterKey(t *testing.T) {
 	if err != nil || got3.Secret != "sk-keep" {
 		t.Fatalf("after auto-unseal: %+v err %v", got3, err)
 	}
-	if err := v.UnlockWithPassphrase("pass"); err != nil {
+	if err := v.UnlockWithPassphrase("test-passphrase"); err != nil {
 		t.Fatal(err)
 	}
 
-	v2, _, err := vault.Init(t.TempDir(), "x")
+	v2, _, err := vault.Init(t.TempDir(), "x-passphrase1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v2.RotateMasterKey("wrong", "test"); !errors.Is(err, vault.ErrInvalidMasterKey) {
+	if _, err := v2.RotateMasterKey("wrong-passphrase", "test"); !errors.Is(err, vault.ErrInvalidMasterKey) {
 		t.Fatalf("wrong pass: %v", err)
 	}
 	v2.Lock()
-	if _, err := v2.RotateMasterKey("x", "test"); !errors.Is(err, vault.ErrSealed) {
+	if _, err := v2.RotateMasterKey("x-passphrase1", "test"); !errors.Is(err, vault.ErrSealed) {
 		t.Fatalf("sealed: %v", err)
+	}
+}
+
+func TestInitRejectsShortPassphrase(t *testing.T) {
+	_, _, err := vault.Init(t.TempDir(), "short")
+	if err == nil {
+		t.Fatal("expected short passphrase rejection")
 	}
 }
 
 func TestUnlockWithWrongUnsealKeyFails(t *testing.T) {
 	dir := t.TempDir()
-	v, res, err := vault.Init(dir, "test-pass")
+	v, res, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +290,7 @@ func TestUnlockWithWrongUnsealKeyFails(t *testing.T) {
 
 func TestSnapshotRestoreAndExportImport(t *testing.T) {
 	dir := t.TempDir()
-	v, _, err := vault.Init(dir, "pass")
+	v, _, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,11 +328,11 @@ func TestSnapshotRestoreAndExportImport(t *testing.T) {
 		t.Fatalf("restored secret: %+v err %v", got, err)
 	}
 
-	blob, err := v.BuildExport("test", "backup-pass")
+	blob, err := v.BuildExport("test", "backup-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
-	records, err := backup.OpenExport("backup-pass", blob)
+	records, err := backup.OpenExport("backup-passphrase", blob)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +360,7 @@ func TestSnapshotRestoreAndExportImport(t *testing.T) {
 
 func TestBuildExportWhileSealed(t *testing.T) {
 	dir := t.TempDir()
-	v, _, err := vault.Init(dir, "pass")
+	v, _, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +373,7 @@ func TestBuildExportWhileSealed(t *testing.T) {
 func TestUpdateSettingsWritesCaddyfile(t *testing.T) {
 	dir := t.TempDir()
 	caddyDir := filepath.Join(dir, "caddy-config")
-	v, _, err := vault.Init(dir, "pass")
+	v, _, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +424,7 @@ func TestUpdateSettingsWritesCaddyfile(t *testing.T) {
 
 func TestUpdateSettingsInvalidHostname(t *testing.T) {
 	dir := t.TempDir()
-	v, _, err := vault.Init(dir, "pass")
+	v, _, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +439,7 @@ func TestUpdateSettingsInvalidHostname(t *testing.T) {
 func TestUpdateSettingsDisabledWritesStub(t *testing.T) {
 	dir := t.TempDir()
 	caddyDir := filepath.Join(dir, "caddy-config")
-	v, _, err := vault.Init(dir, "pass")
+	v, _, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,7 +467,7 @@ func TestUpdateSettingsDisabledWritesStub(t *testing.T) {
 
 func TestUpdateSettingsSkipsFileWhenNoCaddyDir(t *testing.T) {
 	dir := t.TempDir()
-	v, _, err := vault.Init(dir, "pass")
+	v, _, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -479,7 +486,7 @@ func TestUpdateSettingsSkipsFileWhenNoCaddyDir(t *testing.T) {
 
 func TestGetSettingsDefaults(t *testing.T) {
 	dir := t.TempDir()
-	v, _, err := vault.Init(dir, "pass")
+	v, _, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -504,7 +511,7 @@ func TestGetSettingsDefaults(t *testing.T) {
 
 func TestWriteSnapshotMissingUnsealKey(t *testing.T) {
 	dir := t.TempDir()
-	v, _, err := vault.Init(dir, "pass")
+	v, _, err := vault.Init(dir, "test-passphrase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -514,5 +521,18 @@ func TestWriteSnapshotMissingUnsealKey(t *testing.T) {
 	var buf bytes.Buffer
 	if err := v.WriteSnapshot("test", &buf); err == nil {
 		t.Fatal("expected error when unseal.key missing")
+	}
+}
+
+func TestWriteSnapshotRequiresUnsealed(t *testing.T) {
+	dir := t.TempDir()
+	v, _, err := vault.Init(dir, "test-passphrase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.Lock()
+	var buf bytes.Buffer
+	if err := v.WriteSnapshot("test", &buf); !errors.Is(err, vault.ErrSealed) {
+		t.Fatalf("got %v want %v", err, vault.ErrSealed)
 	}
 }

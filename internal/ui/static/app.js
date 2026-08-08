@@ -739,7 +739,7 @@ var AV = (function () {
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
       clearMessage(statusEl);
-      if (statusEl) statusEl.textContent = 'Saving…';
+      showInfo(statusEl, 'Saving…');
 
       var body = {
         public_hostname: hostnameEl ? hostnameEl.value.trim() : '',

@@ -61,11 +61,11 @@
       <details class="form-card cloudflare-checklist" id="cloudflare-checklist">
         <summary>Cloudflare DNS setup (grey cloud)</summary>
         <ol class="checklist">
-          <li>In Cloudflare DNS, add an <strong>A</strong> (IPv4) and/or <strong>AAAA</strong> (IPv6) record for your subdomain pointing to this host&rsquo;s public IP.</li>
+          <li>In Cloudflare DNS, add an <strong>A</strong> (IPv4) and/or <strong>AAAA</strong> (IPv6) record for your subdomain pointing to beast&rsquo;s public IP (or CNAME if applicable).</li>
           <li>Set proxy status to <strong>DNS only</strong> (<strong>grey cloud</strong>), not Proxied (orange cloud).</li>
-          <li>Ensure your firewall/router forwards ports <strong>80</strong> and <strong>443</strong> to the host running Compose.</li>
+          <li>Ensure beast firewall/router forwards ports <strong>80</strong> and <strong>443</strong> to the host running Compose.</li>
           <li>Wait for DNS to resolve publicly (<code>dig</code> or Cloudflare dashboard).</li>
-          <li>Save Settings with <strong>Enable HTTPS</strong> checked, then run the Compose command shown in the apply hint below.</li>
+          <li>Save Settings with <strong>Enable HTTPS</strong> checked, then run the Compose command shown in the Status section above.</li>
         </ol>
       </details>
     </section>

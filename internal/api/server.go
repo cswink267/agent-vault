@@ -11,6 +11,7 @@ import (
 
 	"github.com/cswink267/agent-vault/internal/crypto"
 	"github.com/cswink267/agent-vault/internal/store"
+	"github.com/cswink267/agent-vault/internal/ui"
 	"github.com/cswink267/agent-vault/internal/vault"
 )
 
@@ -39,6 +40,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/search", s.withAuth(s.handleSearch))
 	mux.HandleFunc("GET /v1/audit", s.withAuth(s.handleAudit))
 	mux.HandleFunc("POST /v1/tokens", s.withAuth(s.handleCreateToken))
+	uiHandler := ui.New(s.vault).Handler()
+	mux.Handle("/ui/", uiHandler)
+	mux.Handle("/ui", uiHandler)
 	return mux
 }
 

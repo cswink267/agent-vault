@@ -86,6 +86,35 @@ func TestHealthAndSecretLifecycle(t *testing.T) {
 	}
 }
 
+func TestUIMountedWithoutBearer(t *testing.T) {
+	dir := t.TempDir()
+	v, _, err := vault.Init(dir, "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := api.New(v)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/ui/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /ui/login status %d want 200", resp.StatusCode)
+	}
+
+	resp, err = http.Get(ts.URL + "/v1/secrets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("GET /v1/secrets without bearer status %d want 401", resp.StatusCode)
+	}
+}
+
 func TestUnauthorized(t *testing.T) {
 	dir := t.TempDir()
 	v, _, err := vault.Init(dir, "pass")

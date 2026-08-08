@@ -46,6 +46,12 @@ Health check:
 curl -s http://localhost:8200/health
 ```
 
+## Admin UI
+
+Humans can manage secrets in a browser at **http://beast:8200/ui** (or `http://localhost:8200/ui` locally). Log in with the vault **passphrase** (same value used at init or unlock). The UI uses a session cookie and CSRF token for mutating requests; it does not replace bearer auth on `/v1`.
+
+**Security:** Admin UI is plain HTTP like the REST API — use only on the private LAN until the HTTPS slice lands. Do not expose port 8200 to the public internet.
+
 Compose publishes host **8200** → container `8080` (beast `:8080` is already taken by filebrowser). Inside the container the server still binds `0.0.0.0:$PORT` (default `8080`). All vault state (`vault.db`, `unseal.key`, `root.token`) lives only on the `/data` volume.
 
 ### Local init (without container entrypoint)
@@ -96,6 +102,7 @@ Search endpoint: `GET /v1/search` (query params `q`, `tag`, `type`). This path r
 | Route | Auth | Purpose |
 |-------|------|---------|
 | `GET /health` | no | Liveness + sealed status |
+| `GET /ui/*` | session cookie | Admin UI (humans; passphrase login) |
 | `POST /v1/unlock` | yes | Unlock with passphrase or unseal key |
 | `POST /v1/lock` | yes | Seal vault |
 | `GET/POST /v1/secrets` | yes | List / create secrets |
@@ -124,4 +131,4 @@ Planned after Phase 1 is verified on beast:
 - Backup and export tooling
 - Secret rotation helpers
 
-Admin UI remains optional and out of scope unless re-requested.
+Admin UI is available at `/ui` for human operators; agents should continue using MCP/CLI with bearer tokens.

@@ -45,6 +45,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /ui/api/change-passphrase", s.withSessionCSRF(s.handleChangePassphrase))
 	mux.HandleFunc("POST /ui/api/rotate-master", s.withSessionCSRF(s.handleRotateMaster))
 	mux.HandleFunc("GET /ui/api/audit", s.withSession(s.handleAudit))
+	mux.HandleFunc("GET /ui/api/backup/snapshot", methodNotAllowed)
 	mux.HandleFunc("POST /ui/api/backup/snapshot", s.withSessionCSRF(s.handleBackupSnapshot))
 	mux.HandleFunc("POST /ui/api/backup/export", s.withSessionCSRF(s.handleBackupExport))
 
@@ -418,6 +419,11 @@ func (s *Server) handleDetailPage(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAuditPage(w http.ResponseWriter, r *http.Request) {
 	s.renderPage(w, "audit", nil)
+}
+
+func methodNotAllowed(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Allow", http.MethodPost)
+	writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 }
 
 func (s *Server) withSession(next http.HandlerFunc) http.HandlerFunc {

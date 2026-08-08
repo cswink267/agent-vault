@@ -7,7 +7,7 @@ description: Store and retrieve shared credentials via agent-vault. Use when the
 
 Use agent-vault to share encrypted credentials across Hermes, Cursor, Claude Code, and other agents on beast. Secrets are stored by stable name (e.g. `openai.api_key`) and retrieved on demand.
 
-Humans may use the Admin UI at `http://beast:8200/ui` (passphrase login; change passphrase / rotate master in the UI or via `vault change-passphrase` / `vault rotate-master`; download snapshots/exports under **Backup & export**). Agents should use MCP or CLI with bearer tokens — not the browser UI. For disaster recovery, operators use `vault backup` / `restore` / `export` / `import` (CLI); agents do not run backup commands.
+Humans configure the vault in **Settings** at `http://beast:8200/ui/settings` (passphrase login; hostname/HTTPS, change passphrase, rotate master, backup downloads). Agents should use MCP or CLI with bearer tokens — not the browser UI. For disaster recovery, operators use `vault backup` / `restore` / `export` / `import` (CLI); agents do not run backup commands.
 
 ## Auto-use rules
 
@@ -23,13 +23,13 @@ Follow these rules automatically — do not wait for the user to ask:
 Set before every vault command:
 
 ```bash
-export AGENT_VAULT_URL=http://beast:8200
+export AGENT_VAULT_URL=http://beast:8200   # or https://<public_hostname> when HTTPS is enabled
 export AGENT_VAULT_TOKEN=<token>
 ```
 
 | Variable | Purpose |
 |----------|---------|
-| `AGENT_VAULT_URL` | Vault API base URL (default on beast: `http://beast:8200`) |
+| `AGENT_VAULT_URL` | Vault API base URL. Default on beast (private LAN): `http://beast:8200`. When HTTPS is configured in Settings, use `https://<public_hostname>` for remote/cloud agents. |
 | `AGENT_VAULT_TOKEN` | Bearer token for authentication |
 
 ## CLI commands (primary)

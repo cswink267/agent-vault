@@ -50,7 +50,28 @@ curl -s http://localhost:8200/health
 
 Humans can manage secrets in a browser at **http://beast:8200/ui** (or `http://localhost:8200/ui` locally). Log in with the vault **passphrase** (same value used at init or unlock). The UI uses a session cookie and CSRF token for mutating requests; it does not replace bearer auth on `/v1`.
 
-To rotate the passphrase after init, use **Change passphrase** in the Admin UI, or:
+**Settings** (`/ui/settings`) is the operator home for network/HTTPS, security, and backups. First boot works with no domain configured — private HTTP on `:8200` is unchanged.
+
+### HTTPS (optional)
+
+To expose the vault to cloud agents over TLS, configure a public hostname in **Settings**, then start the Compose `https` profile (Caddy terminates TLS and proxies to `agent-vault:8080`).
+
+1. Open **Settings** → **Network & HTTPS**.
+2. Enter your public hostname (FQDN only, e.g. `vault.example.com` — no `https://` or path).
+3. In **Cloudflare DNS**, add **A** and/or **AAAA** records for that hostname pointing to beast’s public IP.
+4. Set proxy status to **DNS only** (grey cloud) — **not** Proxied (orange cloud). Let’s Encrypt HTTP-01 requires direct reachability on ports 80/443.
+5. Forward host ports **80** and **443** to the machine running Compose.
+6. Wait for DNS to resolve publicly (`dig` / Cloudflare dashboard).
+7. Check **Enable HTTPS**, save Settings (vault writes `Caddyfile` into the `caddy-config` volume).
+8. Start or reload the HTTPS profile:
+
+```bash
+docker compose -f deploy/docker-compose.yml --profile https up -d
+```
+
+Agents and remote browsers can then use `https://<hostname>`; LAN access on `http://beast:8200` remains available. The Settings page shows the suggested public URL and apply command after save.
+
+To rotate the passphrase after init, use **Change passphrase** in **Settings**, or:
 
 ```bash
 vault change-passphrase --old 'current' --new 'replacement'
@@ -58,7 +79,7 @@ vault change-passphrase --old 'current' --new 'replacement'
 
 (`POST /v1/change-passphrase` with bearer auth). This rewraps the master key only — `unseal.key` and secrets are unchanged. **All bearer tokens are revoked** and a new root token is returned once (also written to `root.token` on the server). Update `AGENT_VAULT_TOKEN` / `~/.config/agent-vault` and remint agent tokens. After rotating on beast, update `~/.config/agent-vault/passphrase` so local notes stay accurate.
 
-**Security:** Admin UI is plain HTTP like the REST API — use only on the private LAN until the HTTPS slice lands. Do not expose port 8200 to the public internet.
+**Security:** Private HTTP on `:8200` is for the LAN only. For public access, use the `https` profile with a strong passphrase and per-agent bearer tokens — do not expose plain HTTP to the internet.
 
 Compose publishes host **8200** → container `8080` (beast `:8080` is already taken by filebrowser). Inside the container the server still binds `0.0.0.0:$PORT` (default `8080`). All vault state (`vault.db`, `unseal.key`, `root.token`) lives only on the `/data` volume.
 
@@ -104,7 +125,7 @@ vault export --passphrase '<backup-pass>' --out export.ave
 vault import --passphrase '<backup-pass>' --in export.ave [--overwrite]
 ```
 
-In the Admin UI, open **Backup & export** on any authenticated page to **Download snapshot** or **Download export** (prompts for a backup passphrase). Treat `.avs.tar.gz` and `.ave` files as highly sensitive.
+In the Admin UI, open **Settings** → **Backup** to **Download snapshot** or **Download export** (prompts for a backup passphrase). Treat `.avs.tar.gz` and `.ave` files as highly sensitive.
 
 ## MCP & agent skills
 
@@ -123,7 +144,7 @@ Set `AGENT_VAULT_URL` and `AGENT_VAULT_TOKEN` in the MCP server env. Ensure `vau
 - **Unseal key** — `/data/unseal.key` is written with mode `0600` at init and rewritten by `rotate-master`. Restrict volume access on the host; anyone with read access to this file can unseal the vault.
 - **Root token** — Treat like a password. Save from init logs or `/data/root.token`; mint scoped tokens via `POST /v1/tokens` for agents.
 - **Passphrase** — Required for init, Admin UI login, and manual unlock (`POST /v1/unlock`). Rotate with `vault change-passphrase` or the Admin UI form (does not invalidate `unseal.key`; **does revoke all bearer tokens** and mints a new root token). Do not commit it to git or bake it into images.
-- **Network** — Phase 1 serves plain HTTP on the private network. Do not expose host port 8200 (or the container port) to the public internet without TLS.
+- **Network** — Private HTTP on host port 8200 is for the LAN. Public access should use the optional `https` Compose profile (Caddy + Let’s Encrypt) with Cloudflare **DNS only** (grey cloud). Do not use orange-cloud proxying for this setup.
 
 ## HTTP API
 
@@ -154,14 +175,15 @@ Search endpoint: `GET /v1/search` (query params `q`, `tag`, `type`). This path r
 | `AGENT_VAULT_UNSEAL_KEY` | `$DATA_DIR/unseal.key` | Auto-unseal key file path |
 | `AGENT_VAULT_PASSPHRASE` | — | Passphrase for first-time init |
 | `AGENT_VAULT_INIT` | — | Set to `1` to allow init when DB is missing |
-| `AGENT_VAULT_URL` | `http://localhost:8200` | CLI/MCP API base URL (Compose host port) |
+| `AGENT_VAULT_URL` | `http://localhost:8200` | CLI/MCP API base URL (Compose host port; use `https://<hostname>` when HTTPS is configured) |
 | `AGENT_VAULT_TOKEN` | — | Bearer token for CLI/MCP |
+| `AGENT_VAULT_CADDY_CONFIG_DIR` | `/caddy-config` (container) | Directory where Settings writes the generated `Caddyfile` |
 
 ## Phase 2 preview
 
-Planned after Phase 1 is verified on beast:
+Shipped on beast:
 
-- HTTPS reverse-proxy Compose profile (Caddy/nginx + TLS) for cloud agents
-- Secret rotation helpers
-
-Backup/export tooling and Admin UI downloads are available (`vault backup` / `export` / `restore` / `import` and **Backup & export** in the UI). Admin UI is at `/ui` for human operators; agents should continue using MCP/CLI with bearer tokens.
+- Admin UI at `/ui` with **Settings** (network/HTTPS, security ops, backups)
+- Optional Compose `https` profile (Caddy + Let’s Encrypt) for cloud agents
+- Backup/export tooling (`vault backup` / `export` / `restore` / `import` and **Settings → Backup** in the UI)
+- Passphrase change and master-key rotation (`vault change-passphrase` / `rotate-master` or Settings forms)

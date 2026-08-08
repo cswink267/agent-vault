@@ -324,22 +324,15 @@ input[type="password"]#new-secret {
   color: #6b4f2a;
 }
 
-.passphrase-panel {
-  max-width: 28rem;
-  margin: 0 auto var(--space);
-  padding: 0 var(--space);
-}
-
-.backup-panel {
-  max-width: 28rem;
-  margin: 0 auto var(--space);
-  padding: 0 var(--space);
-}
-
-.backup-panel summary {
-  cursor: pointer;
+.security-form h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
   font-weight: 600;
-  color: var(--text-muted);
+}
+
+.security-form .text-muted {
+  margin: 0 0 0.75rem;
+  font-size: 0.875rem;
 }
 
 .backup-actions {
@@ -347,43 +340,12 @@ input[type="password"]#new-secret {
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
-  margin-top: 0.75rem;
-  padding: 1rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-.backup-actions .text-muted {
-  flex: 1 1 100%;
-  margin: 0 0 0.25rem;
-  font-size: 0.875rem;
 }
 
 #backup-status {
   flex: 1 1 100%;
   margin: 0;
   min-height: 1.25rem;
-}
-
-.passphrase-panel summary {
-  cursor: pointer;
-  font-weight: 600;
-  color: var(--text-muted);
-}
-
-.passphrase-form {
-  display: grid;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-  padding: 1rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-.passphrase-form label {
-  font-size: 0.875rem;
 }
 
 .settings-section {
@@ -492,10 +454,6 @@ input[type="password"]#new-secret {
   background: var(--bg);
   padding: 0.125rem 0.25rem;
   border-radius: 2px;
-}
-
-.settings-placeholder {
-  opacity: 0.85;
 }
 
 .page-login {

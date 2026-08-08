@@ -387,8 +387,15 @@ func TestUIPagesAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(body), "Secrets") {
-		t.Fatalf("list page body missing 'Secrets': %s", body)
+	page := string(body)
+	if !strings.Contains(page, "Secrets") {
+		t.Fatalf("list page body missing 'Secrets': %s", page)
+	}
+	if strings.Contains(page, "change-passphrase-form") {
+		t.Fatal("list page must not include change-passphrase form")
+	}
+	if strings.Contains(page, "btn-backup-snapshot") {
+		t.Fatal("list page must not include backup controls")
 	}
 }
 
@@ -858,6 +865,18 @@ func TestUISettingsPage(t *testing.T) {
 	}
 	if !strings.Contains(page, "DNS only") || !strings.Contains(page, "grey cloud") {
 		t.Fatalf("settings page missing Cloudflare checklist copy")
+	}
+	if !strings.Contains(page, `id="change-passphrase-form"`) {
+		t.Fatal("settings page must include change-passphrase form")
+	}
+	if !strings.Contains(page, `id="rotate-master-form"`) {
+		t.Fatal("settings page must include rotate-master form")
+	}
+	if !strings.Contains(page, `id="btn-backup-snapshot"`) {
+		t.Fatal("settings page must include backup snapshot control")
+	}
+	if !strings.Contains(page, `id="btn-backup-export"`) {
+		t.Fatal("settings page must include backup export control")
 	}
 }
 

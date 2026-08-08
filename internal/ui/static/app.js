@@ -184,7 +184,9 @@ var AV = (function () {
         });
       });
     }
+  }
 
+  function initSecurityAndBackup() {
     var cpForm = document.getElementById('change-passphrase-form');
     if (cpForm) {
       cpForm.addEventListener('submit', function (ev) {
@@ -711,6 +713,8 @@ var AV = (function () {
     var httpsEl = document.getElementById('https-enabled');
     var statusEl = document.getElementById('settings-status');
     if (!form) return;
+
+    initSecurityAndBackup();
 
     function loadSettings() {
       clearMessage(statusEl);

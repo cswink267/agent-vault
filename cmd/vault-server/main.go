@@ -20,6 +20,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("vault setup failed: %v", err)
 	}
+	v.SetCaddyConfigDir(envOr("AGENT_VAULT_CADDY_CONFIG_DIR", ""))
 
 	ok, err := v.TryAutoUnseal(unsealKeyPath)
 	if err != nil {

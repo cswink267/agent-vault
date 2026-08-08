@@ -83,3 +83,29 @@ func TestVacuumInto(t *testing.T) {
 		t.Fatalf("copied meta: %v %v %q", err, ok, v)
 	}
 }
+
+func TestStoreSettingsRoundTrip(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "v.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	in := store.Settings{PublicHostname: "vault.example.com", HTTPSEnabled: true}
+	if err := st.PutSettings(in); err != nil {
+		t.Fatal(err)
+	}
+	out, err := st.GetSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.PublicHostname != in.PublicHostname {
+		t.Fatalf("hostname: got %q want %q", out.PublicHostname, in.PublicHostname)
+	}
+	if !out.HTTPSEnabled {
+		t.Fatal("https_enabled not true")
+	}
+	if out.UpdatedAt == "" {
+		t.Fatal("updated_at empty")
+	}
+}

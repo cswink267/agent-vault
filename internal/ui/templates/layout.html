@@ -8,6 +8,7 @@
       <a href="/ui/">Secrets</a>
       <a href="/ui/secrets/new">New</a>
       <a href="/ui/audit">Audit</a>
+      <a href="/ui/settings">Settings</a>
     </nav>
     <div class="header-actions">
       <span id="vault-status" class="status-badge" aria-live="polite"></span>
@@ -20,33 +21,4 @@
 <div id="sealed-banner" class="sealed-banner" role="alert" hidden>
   Vault is sealed. Unlock to manage secrets.
 </div>
-<details class="backup-panel">
-  <summary>Backup &amp; export</summary>
-  <div class="backup-actions">
-    <p class="text-muted">Download a disaster-recovery snapshot or a portable encrypted export. Restore and import are CLI-only.</p>
-    <button type="button" id="btn-backup-snapshot" class="btn btn-secondary">Download snapshot</button>
-    <button type="button" id="btn-backup-export" class="btn btn-secondary">Download export</button>
-    <p id="backup-status" class="text-muted" aria-live="polite"></p>
-  </div>
-</details>
-<details class="passphrase-panel">
-  <summary>Change passphrase</summary>
-  <form id="change-passphrase-form" class="passphrase-form">
-    <label for="cp-old">Current passphrase</label>
-    <input type="password" id="cp-old" name="old_passphrase" autocomplete="current-password" required>
-    <label for="cp-new">New passphrase</label>
-    <input type="password" id="cp-new" name="new_passphrase" autocomplete="new-password" required>
-    <label for="cp-confirm">Confirm new passphrase</label>
-    <input type="password" id="cp-confirm" name="confirm_passphrase" autocomplete="new-password" required>
-    <p id="cp-status" class="text-muted" aria-live="polite"></p>
-    <button type="submit" class="btn btn-primary">Update passphrase</button>
-  </form>
-  <form id="rotate-master-form" class="passphrase-form">
-    <p class="text-muted">Rotate the encryption master key. Rewrites unseal.key and revokes all agent tokens.</p>
-    <label for="rm-pass">Confirm passphrase</label>
-    <input type="password" id="rm-pass" name="passphrase" autocomplete="current-password" required>
-    <p id="rm-status" class="text-muted" aria-live="polite"></p>
-    <button type="submit" class="btn btn-secondary">Rotate master key</button>
-  </form>
-</details>
 {{end}}

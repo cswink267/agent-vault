@@ -184,7 +184,9 @@ var AV = (function () {
         });
       });
     }
+  }
 
+  function initSecurityAndBackup() {
     var cpForm = document.getElementById('change-passphrase-form');
     if (cpForm) {
       cpForm.addEventListener('submit', function (ev) {
@@ -672,12 +674,111 @@ var AV = (function () {
     });
   }
 
+  function renderSettingsStatus(data) {
+    var privateEl = document.getElementById('status-private-url');
+    var publicEl = document.getElementById('status-public-url');
+    var caddyEl = document.getElementById('status-caddyfile');
+    var updatedEl = document.getElementById('status-updated');
+    var hintBlock = document.getElementById('apply-hint-block');
+    var hintEl = document.getElementById('apply-hint');
+
+    if (privateEl) privateEl.textContent = data.private_base_url || '—';
+    if (publicEl) publicEl.textContent = data.public_base_url || '—';
+    if (caddyEl) {
+      caddyEl.textContent = data.caddyfile_status || '—';
+      caddyEl.classList.toggle('status-active', data.caddyfile_status === 'active');
+      caddyEl.classList.toggle('status-disabled', data.caddyfile_status === 'disabled');
+    }
+    if (updatedEl) updatedEl.textContent = data.updated_at ? formatTime(data.updated_at) : '—';
+
+    if (hintBlock && hintEl) {
+      var hint = data.apply_hint || '';
+      if (hint) {
+        hintEl.textContent = hint;
+        hintBlock.hidden = false;
+      } else {
+        hintBlock.hidden = true;
+      }
+    }
+
+    var checklist = document.getElementById('cloudflare-checklist');
+    if (checklist && data.public_hostname) {
+      checklist.open = true;
+    }
+  }
+
+  function initSettingsPage() {
+    var form = document.getElementById('settings-form');
+    var hostnameEl = document.getElementById('public-hostname');
+    var httpsEl = document.getElementById('https-enabled');
+    var statusEl = document.getElementById('settings-status');
+    if (!form) return;
+
+    initSecurityAndBackup();
+
+    function loadSettings() {
+      clearMessage(statusEl);
+      return apiFetch('/ui/api/settings').then(function (resp) {
+        if (resp.status === 401) {
+          window.location.href = '/ui/login';
+          return null;
+        }
+        if (!resp.ok) {
+          return resp.json().then(function (data) {
+            showError(statusEl, (data && data.error) || 'Failed to load settings');
+            return null;
+          });
+        }
+        return resp.json();
+      }).then(function (data) {
+        if (!data) return;
+        if (hostnameEl) hostnameEl.value = data.public_hostname || '';
+        if (httpsEl) httpsEl.checked = !!data.https_enabled;
+        renderSettingsStatus(data);
+      });
+    }
+
+    loadSettings();
+
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      clearMessage(statusEl);
+      showInfo(statusEl, 'Saving…');
+
+      var body = {
+        public_hostname: hostnameEl ? hostnameEl.value.trim() : '',
+        https_enabled: httpsEl ? httpsEl.checked : false
+      };
+
+      apiFetch('/ui/api/settings', {
+        method: 'PUT',
+        body: JSON.stringify(body)
+      }).then(function (resp) {
+        return resp.json().then(function (data) {
+          return { ok: resp.ok, data: data };
+        });
+      }).then(function (result) {
+        if (result.ok) {
+          if (hostnameEl) hostnameEl.value = result.data.public_hostname || '';
+          if (httpsEl) httpsEl.checked = !!result.data.https_enabled;
+          renderSettingsStatus(result.data);
+          showInfo(statusEl, 'Settings saved.');
+          return;
+        }
+        showError(statusEl, (result.data && result.data.error) || 'Save failed');
+      }).catch(function () {
+        showError(statusEl, 'Save failed');
+      });
+    });
+  }
+
   return {
     initAppChrome: initAppChrome,
     initLoginPage: initLoginPage,
     initListPage: initListPage,
     initDetailPage: initDetailPage,
     initNewPage: initNewPage,
-    initAuditPage: initAuditPage
+    initAuditPage: initAuditPage,
+    initSettingsPage: initSettingsPage
   };
 })();

@@ -36,10 +36,11 @@ var validTypes = map[string]bool{
 }
 
 type Vault struct {
-	mu      sync.RWMutex
-	store   *store.Store
-	master  *crypto.MasterKey
-	dataDir string
+	mu             sync.RWMutex
+	store          *store.Store
+	master         *crypto.MasterKey
+	dataDir        string
+	caddyConfigDir string
 }
 
 type InitResult struct {

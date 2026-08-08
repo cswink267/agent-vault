@@ -4,6 +4,8 @@ Agent Vault is a shared, encrypted secrets store for **you** and your **AI agent
 
 These guides are written for people who operate the vault day to day. Design history and implementation notes live under [`superpowers/`](superpowers/) — you can ignore those unless you are changing the product.
 
+**License:** [Apache License 2.0](../LICENSE) — Copyright 2026 Chris Swink ([NOTICE](../NOTICE)).
+
 ## If you only read two pages
 
 1. **[Install & operations](install-and-ops.md)** — get it running, keep it running, HTTPS, upgrades, troubleshooting  

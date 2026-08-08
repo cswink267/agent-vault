@@ -72,6 +72,10 @@ Compose: `deploy/docker-compose.yml` (canonical) or root `docker-compose.yml`. H
 
 Optional public HTTPS: Settings → hostname + Cloudflare **DNS only** (grey cloud), then `docker compose --profile https up -d`. Details in [install & ops](docs/install-and-ops.md).
 
-## License / status
+## License
 
-Internal operator tooling for a single-tenant host deployment. Design history under [`docs/superpowers/`](docs/superpowers/).
+Licensed under the [Apache License, Version 2.0](LICENSE).
+
+Copyright 2026 Chris Swink. See [NOTICE](NOTICE).
+
+Single-tenant encrypted secrets vault for a trusted host. Design history under [`docs/superpowers/`](docs/superpowers/).

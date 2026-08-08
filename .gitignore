@@ -4,3 +4,7 @@ bin/
 /vault-server
 /vault
 /vault-mcp
+
+# Local agent skill installs / lockfiles — not part of the release tree
+.agents/
+skills-lock.json

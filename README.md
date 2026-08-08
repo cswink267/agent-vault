@@ -141,10 +141,12 @@ Set `AGENT_VAULT_URL` and `AGENT_VAULT_TOKEN` in the MCP server env. Ensure `vau
 
 ## Security notes
 
-- **Unseal key** — `/data/unseal.key` is written with mode `0600` at init and rewritten by `rotate-master`. Restrict volume access on the host; anyone with read access to this file can unseal the vault. Snapshot downloads include this key — treat snapshot files as full vault compromise material.
-- **Root token** — Treat like a password. On server init it is written only to `/data/root.token` (mode `0600`), not to container logs. Mint agent tokens via `POST /v1/tokens`.
-- **Passphrase** — Minimum **12 characters** for init, change-passphrase, and backup export. Required for Admin UI login and manual unlock. Login/unlock are rate-limited (5 failures / 15 minutes per client IP). Rotate with `vault change-passphrase` or Settings (does not invalidate `unseal.key`; **does revoke all bearer tokens** and mints a new root token). Unset `AGENT_VAULT_PASSPHRASE` after init.
-- **Network** — Private HTTP on host port 8200 is for the LAN. Prefer binding only where needed (`AGENT_VAULT_BIND`). Public access should use the optional `https` Compose profile (Caddy + Let’s Encrypt) with Cloudflare **DNS only** (grey cloud). Set `AGENT_VAULT_TRUST_PROXY=1` when rate limits should use `X-Forwarded-For` behind Caddy.
+- **Unseal key** — `/data/unseal.key` is written with mode `0600` at init and rewritten by `rotate-master`. Restrict volume access on the host; anyone with read access to this file can unseal the vault.
+- **Tokens** — Root init token is `admin`. Mint agent tokens with `vault token create --label <name>` (default scope `agent`: secrets only). Admin-only: token list/revoke, backups, lock, rotate, audit. Revoke with `vault token revoke --id <id>` (cannot revoke the last admin).
+- **Snapshots** — New downloads are **AVS2** (Argon2id + AES-GCM). Require `--passphrase` on `vault backup` / `restore`. Legacy gzip snapshots still restore without a passphrase.
+- **Root token** — Treat like a password. On server init it is written only to `/data/root.token` (mode `0600`), not to container logs.
+- **Passphrase** — Minimum **12 characters** for init, change-passphrase, backup export, and snapshot encryption. Login/unlock are rate-limited (5 failures / 15 minutes per client IP). Unset `AGENT_VAULT_PASSPHRASE` after init.
+- **Network** — Private HTTP on host port 8200 is for the LAN. Prefer binding only where needed (`AGENT_VAULT_BIND`). Optional Settings **IP allowlist** blocks `/ui` and `/v1` for non-listed clients (`/health` stays open). Public access should use the `https` Compose profile with Cloudflare **DNS only** (grey cloud). Set `AGENT_VAULT_TRUST_PROXY=1` behind Caddy for rate limits and allowlist.
 
 ## HTTP API
 
@@ -162,9 +164,11 @@ Search endpoint: `GET /v1/search` (query params `q`, `tag`, `type`). This path r
 | `GET/PUT/DELETE /v1/secrets/{name}` | yes | Read / update / delete |
 | `GET /v1/search` | yes | Search by query, tag, type |
 | `GET /v1/audit` | yes | Audit log |
-| `GET /v1/backup/snapshot` | yes | Download snapshot archive |
-| `POST /v1/backup/export` | yes | Download encrypted export |
-| `POST /v1/tokens` | yes | Mint labeled API token |
+| `POST /v1/backup/snapshot` | admin | Download encrypted AVS2 snapshot (`snapshot_passphrase`) |
+| `POST /v1/backup/export` | admin | Download encrypted export |
+| `GET /v1/tokens` | admin | List tokens (id/label/scope) |
+| `POST /v1/tokens` | admin | Mint token (`label`, optional `scope`) |
+| `DELETE /v1/tokens/{id}` | admin | Revoke one token |
 
 ## Environment variables
 

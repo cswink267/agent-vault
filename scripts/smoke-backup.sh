@@ -57,10 +57,20 @@ curl -sf "$AGENT_VAULT_URL/health" | grep -q '"ok":true'
   --tags smoke,backup >/dev/null
 
 # CLI backup → restore to other dir → get secret
-"$BIN_DIR/vault" backup --out "$SNAPSHOT" >/dev/null
+SNAP_PASS='backup-smoke-snapshot-pass'
+"$BIN_DIR/vault" backup --out "$SNAPSHOT" --passphrase "$SNAP_PASS" >/dev/null
 test -s "$SNAPSHOT"
+# encrypted AVS2 magic
+python3 - "$SNAPSHOT" <<'PY'
+import sys
+p=sys.argv[1]
+with open(p,'rb') as f:
+    magic=f.read(4)
+if magic!=b'AVS2':
+    raise SystemExit(f'expected AVS2 magic, got {magic!r}')
+PY
 
-"$BIN_DIR/vault" restore --in "$SNAPSHOT" --data-dir "$RESTORE_DIR" >/dev/null
+"$BIN_DIR/vault" restore --in "$SNAPSHOT" --data-dir "$RESTORE_DIR" --passphrase "$SNAP_PASS" >/dev/null
 test -f "$RESTORE_DIR/vault.db"
 test -f "$RESTORE_DIR/unseal.key"
 

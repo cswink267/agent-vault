@@ -84,7 +84,7 @@ func TestChangePassphrase(t *testing.T) {
 	if _, err := v.Put("root", vault.Secret{Name: "keep.me", Type: "note", Secret: "still-here"}); err != nil {
 		t.Fatal(err)
 	}
-	agentTok, err := v.CreateToken("root", "agent")
+	agentTok, err := v.CreateToken("root", "agent", "agent")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,8 +106,8 @@ func TestChangePassphrase(t *testing.T) {
 	if _, ok, err := v.Authenticate(agentTok); err != nil || ok {
 		t.Fatalf("agent token should be revoked: ok=%v err=%v", ok, err)
 	}
-	if label, ok, err := v.Authenticate(newRoot); err != nil || !ok || label != "root" {
-		t.Fatalf("new root auth: label=%q ok=%v err=%v", label, ok, err)
+	if id, ok, err := v.Authenticate(newRoot); err != nil || !ok || id.Label != "root" {
+		t.Fatalf("new root auth: label=%q ok=%v err=%v", id.Label, ok, err)
 	}
 	written, err := os.ReadFile(filepath.Join(dir, "root.token"))
 	if err != nil {
@@ -303,15 +303,18 @@ func TestSnapshotRestoreAndExportImport(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := v.WriteSnapshot("test", &buf); err != nil {
+	if err := v.WriteSnapshot("test", "snapshot-passphrase", &buf); err != nil {
 		t.Fatal(err)
+	}
+	if !backup.IsEncryptedSnapshot(buf.Bytes()) {
+		t.Fatal("expected AVS2 encrypted snapshot")
 	}
 
 	destDir := filepath.Join(dir, "restored")
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := backup.ExtractSnapshotTarGz(&buf, destDir); err != nil {
+	if _, err := backup.ExtractSnapshotAuto(buf.Bytes(), "snapshot-passphrase", destDir); err != nil {
 		t.Fatal(err)
 	}
 
@@ -379,7 +382,7 @@ func TestUpdateSettingsWritesCaddyfile(t *testing.T) {
 	}
 	v.SetCaddyConfigDir(caddyDir)
 
-	view, err := v.UpdateSettings("vault.example.com", true)
+	view, err := v.UpdateSettings("vault.example.com", true, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +433,7 @@ func TestUpdateSettingsInvalidHostname(t *testing.T) {
 	}
 	v.SetCaddyConfigDir(filepath.Join(dir, "caddy"))
 
-	_, err = v.UpdateSettings("https://bad.example.com", true)
+	_, err = v.UpdateSettings("https://bad.example.com", true, "")
 	if !errors.Is(err, settings.ErrInvalidHostname) {
 		t.Fatalf("got %v want %v", err, settings.ErrInvalidHostname)
 	}
@@ -445,7 +448,7 @@ func TestUpdateSettingsDisabledWritesStub(t *testing.T) {
 	}
 	v.SetCaddyConfigDir(caddyDir)
 
-	view, err := v.UpdateSettings("vault.example.com", false)
+	view, err := v.UpdateSettings("vault.example.com", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -472,7 +475,7 @@ func TestUpdateSettingsSkipsFileWhenNoCaddyDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	view, err := v.UpdateSettings("vault.example.com", true)
+	view, err := v.UpdateSettings("vault.example.com", true, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -519,7 +522,7 @@ func TestWriteSnapshotMissingUnsealKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
-	if err := v.WriteSnapshot("test", &buf); err == nil {
+	if err := v.WriteSnapshot("test", "snapshot-passphrase", &buf); err == nil {
 		t.Fatal("expected error when unseal.key missing")
 	}
 }
@@ -532,7 +535,7 @@ func TestWriteSnapshotRequiresUnsealed(t *testing.T) {
 	}
 	v.Lock()
 	var buf bytes.Buffer
-	if err := v.WriteSnapshot("test", &buf); !errors.Is(err, vault.ErrSealed) {
+	if err := v.WriteSnapshot("test", "snapshot-passphrase", &buf); !errors.Is(err, vault.ErrSealed) {
 		t.Fatalf("got %v want %v", err, vault.ErrSealed)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cswink267/agent-vault/internal/auth"
 	"github.com/cswink267/agent-vault/internal/crypto"
 	"github.com/cswink267/agent-vault/internal/security"
 	"github.com/cswink267/agent-vault/internal/store"
@@ -20,7 +21,10 @@ import (
 
 type contextKey string
 
-const actorLabelKey contextKey = "actorLabel"
+const (
+	actorLabelKey contextKey = "actorLabel"
+	actorScopeKey contextKey = "actorScope"
+)
 
 const maxJSONBody = 1 << 20 // 1 MiB
 
@@ -46,23 +50,32 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("POST /v1/unlock", s.withAuth(s.handleUnlock))
-	mux.HandleFunc("POST /v1/lock", s.withAuth(s.handleLock))
-	mux.HandleFunc("POST /v1/change-passphrase", s.withAuth(s.handleChangePassphrase))
-	mux.HandleFunc("POST /v1/rotate-master", s.withAuth(s.handleRotateMaster))
+	mux.HandleFunc("POST /v1/lock", s.withAdmin(s.handleLock))
+	mux.HandleFunc("POST /v1/change-passphrase", s.withAdmin(s.handleChangePassphrase))
+	mux.HandleFunc("POST /v1/rotate-master", s.withAdmin(s.handleRotateMaster))
 	mux.HandleFunc("GET /v1/secrets", s.withAuth(s.handleListSecrets))
 	mux.HandleFunc("POST /v1/secrets", s.withAuth(s.handleCreateSecret))
 	mux.HandleFunc("GET /v1/secrets/{name}", s.withAuth(s.handleGetSecret))
 	mux.HandleFunc("PUT /v1/secrets/{name}", s.withAuth(s.handleUpdateSecret))
 	mux.HandleFunc("DELETE /v1/secrets/{name}", s.withAuth(s.handleDeleteSecret))
 	mux.HandleFunc("GET /v1/search", s.withAuth(s.handleSearch))
-	mux.HandleFunc("GET /v1/audit", s.withAuth(s.handleAudit))
-	mux.HandleFunc("POST /v1/tokens", s.withAuth(s.handleCreateToken))
-	mux.HandleFunc("GET /v1/backup/snapshot", s.withAuth(s.handleBackupSnapshot))
-	mux.HandleFunc("POST /v1/backup/export", s.withAuth(s.handleBackupExport))
+	mux.HandleFunc("GET /v1/audit", s.withAdmin(s.handleAudit))
+	mux.HandleFunc("GET /v1/tokens", s.withAdmin(s.handleListTokens))
+	mux.HandleFunc("POST /v1/tokens", s.withAdmin(s.handleCreateToken))
+	mux.HandleFunc("DELETE /v1/tokens/{id}", s.withAdmin(s.handleRevokeToken))
+	mux.HandleFunc("GET /v1/backup/snapshot", s.withAdmin(methodNotAllowedPOST))
+	mux.HandleFunc("POST /v1/backup/snapshot", s.withAdmin(s.handleBackupSnapshot))
+	mux.HandleFunc("POST /v1/backup/export", s.withAdmin(s.handleBackupExport))
 	uiHandler := s.ui.Handler()
 	mux.Handle("/ui/", uiHandler)
 	mux.Handle("/ui", uiHandler)
-	return security.SecurityHeaders(mux)
+	secured := security.SecurityHeaders(mux)
+	return security.AllowlistMiddleware(s.trustProxy, s.vault.IPAllowlist, secured)
+}
+
+func methodNotAllowedPOST(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Allow", http.MethodPost)
+	writeError(w, http.StatusMethodNotAllowed, "method not allowed; use POST with snapshot_passphrase")
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -320,9 +333,29 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request) {
+	actor := actorFromContext(r.Context())
+	tokens, err := s.vault.ListTokens(actor)
+	if err != nil {
+		writeVaultError(w, err)
+		return
+	}
+	out := make([]map[string]interface{}, len(tokens))
+	for i, t := range tokens {
+		out[i] = map[string]interface{}{
+			"id":         t.ID,
+			"label":      t.Label,
+			"scope":      t.Scope,
+			"created_at": t.CreatedAt,
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Label string `json:"label"`
+		Scope string `json:"scope"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
@@ -332,9 +365,14 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "label is required")
 		return
 	}
+	scope := auth.NormalizeScope(body.Scope)
+	if err := auth.ValidateScope(scope); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	actor := actorFromContext(r.Context())
-	token, err := s.vault.CreateToken(actor, body.Label)
+	token, err := s.vault.CreateToken(actor, body.Label, scope)
 	if err != nil {
 		writeVaultError(w, err)
 		return
@@ -342,15 +380,42 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"token": token,
 		"label": body.Label,
+		"scope": scope,
 	})
 }
 
+func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "token id required")
+		return
+	}
+	actor := actorFromContext(r.Context())
+	if err := s.vault.RevokeToken(actor, id); err != nil {
+		writeVaultError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleBackupSnapshot(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		SnapshotPassphrase string `json:"snapshot_passphrase"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if body.SnapshotPassphrase == "" {
+		writeError(w, http.StatusBadRequest, "snapshot_passphrase is required")
+		return
+	}
+
 	actor := actorFromContext(r.Context())
 	security.SetNoStore(w)
-	w.Header().Set("Content-Type", "application/gzip")
-	w.Header().Set("Content-Disposition", "attachment; filename=\"agent-vault-snapshot.avs.tar.gz\"")
-	if err := s.vault.WriteSnapshot(actor, w); err != nil {
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"agent-vault-snapshot.avs\"")
+	if err := s.vault.WriteSnapshot(actor, body.SnapshotPassphrase, w); err != nil {
 		writeVaultError(w, err)
 		return
 	}
@@ -389,7 +454,7 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 			writeError(w, http.StatusUnauthorized, "missing or invalid authorization")
 			return
 		}
-		label, ok, err := s.vault.Authenticate(token)
+		id, ok, err := s.vault.Authenticate(token)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "authentication error")
 			return
@@ -398,9 +463,20 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 			writeError(w, http.StatusUnauthorized, "missing or invalid authorization")
 			return
 		}
-		ctx := context.WithValue(r.Context(), actorLabelKey, label)
+		ctx := context.WithValue(r.Context(), actorLabelKey, id.Label)
+		ctx = context.WithValue(ctx, actorScopeKey, id.Scope)
 		next(w, r.WithContext(ctx))
 	}
+}
+
+func (s *Server) withAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return s.withAuth(func(w http.ResponseWriter, r *http.Request) {
+		if scopeFromContext(r.Context()) != auth.ScopeAdmin {
+			writeError(w, http.StatusForbidden, "admin scope required")
+			return
+		}
+		next(w, r)
+	})
 }
 
 func bearerToken(header string) string {
@@ -413,6 +489,13 @@ func bearerToken(header string) string {
 
 func actorFromContext(ctx context.Context) string {
 	if v, ok := ctx.Value(actorLabelKey).(string); ok {
+		return v
+	}
+	return ""
+}
+
+func scopeFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(actorScopeKey).(string); ok {
 		return v
 	}
 	return ""
@@ -496,6 +579,10 @@ func writeVaultError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, vault.ErrSealed):
 		writeError(w, http.StatusServiceUnavailable, "vault is sealed")
+	case errors.Is(err, vault.ErrForbidden):
+		writeError(w, http.StatusForbidden, "forbidden")
+	case errors.Is(err, vault.ErrLastAdmin):
+		writeError(w, http.StatusConflict, "cannot revoke the last admin token")
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not found")
 	case errors.Is(err, store.ErrConflict):

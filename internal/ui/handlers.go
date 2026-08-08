@@ -347,11 +347,23 @@ func (s *Server) handleRotateMaster(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBackupSnapshot(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		SnapshotPassphrase string `json:"snapshot_passphrase"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if body.SnapshotPassphrase == "" {
+		writeError(w, http.StatusBadRequest, "snapshot_passphrase is required")
+		return
+	}
+
 	actor := actorFromContext(r.Context())
 	security.SetNoStore(w)
-	w.Header().Set("Content-Type", "application/gzip")
-	w.Header().Set("Content-Disposition", "attachment; filename=\"agent-vault-snapshot.avs.tar.gz\"")
-	if err := s.Vault.WriteSnapshot(actor, w); err != nil {
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"agent-vault-snapshot.avs\"")
+	if err := s.Vault.WriteSnapshot(actor, body.SnapshotPassphrase, w); err != nil {
 		writeVaultError(w, err)
 		return
 	}
@@ -472,13 +484,14 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		PublicHostname string `json:"public_hostname"`
 		HTTPSEnabled   bool   `json:"https_enabled"`
+		IPAllowlist    string `json:"ip_allowlist"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 
-	view, err := s.Vault.UpdateSettings(body.PublicHostname, body.HTTPSEnabled, actorFromContext(r.Context()))
+	view, err := s.Vault.UpdateSettings(body.PublicHostname, body.HTTPSEnabled, body.IPAllowlist, actorFromContext(r.Context()))
 	if err != nil {
 		writeVaultError(w, err)
 		return
@@ -490,6 +503,7 @@ func settingsViewToJSON(view vault.SettingsView) map[string]interface{} {
 	return map[string]interface{}{
 		"public_hostname":   view.PublicHostname,
 		"https_enabled":     view.HTTPSEnabled,
+		"ip_allowlist":      view.IPAllowlist,
 		"updated_at":        view.UpdatedAt,
 		"private_base_url":  view.PrivateBaseURL,
 		"public_base_url":   view.PublicBaseURL,

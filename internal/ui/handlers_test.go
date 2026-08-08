@@ -595,7 +595,7 @@ func TestUIBackupSnapshot(t *testing.T) {
 		t.Fatalf("GET snapshot status %d want 405", resp.StatusCode)
 	}
 
-	resp, err = client.Post(ts.URL+"/ui/api/backup/snapshot", "application/json", nil)
+	resp, err = client.Post(ts.URL+"/ui/api/backup/snapshot", "application/json", strings.NewReader(`{"snapshot_passphrase":"snapshot-passphrase"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -605,7 +605,8 @@ func TestUIBackupSnapshot(t *testing.T) {
 		t.Fatalf("snapshot without csrf status %d body %s", resp.StatusCode, b)
 	}
 
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/ui/api/backup/snapshot", nil)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/ui/api/backup/snapshot", strings.NewReader(`{"snapshot_passphrase":"snapshot-passphrase"}`))
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(ui.CSRFHeader, csrf)
 	resp, err = client.Do(req)
 	if err != nil {
@@ -617,19 +618,19 @@ func TestUIBackupSnapshot(t *testing.T) {
 		t.Fatalf("snapshot status %d body %s", resp.StatusCode, b)
 	}
 	ct := resp.Header.Get("Content-Type")
-	if ct != "application/gzip" {
-		t.Fatalf("Content-Type %q want application/gzip", ct)
+	if ct != "application/octet-stream" {
+		t.Fatalf("Content-Type %q want application/octet-stream", ct)
 	}
 	cd := resp.Header.Get("Content-Disposition")
-	if !strings.Contains(cd, "attachment") || !strings.Contains(cd, "agent-vault-snapshot.avs.tar.gz") {
+	if !strings.Contains(cd, "attachment") || !strings.Contains(cd, "agent-vault-snapshot.avs") {
 		t.Fatalf("Content-Disposition %q", cd)
 	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(data) < 2 || data[0] != 0x1f || data[1] != 0x8b {
-		t.Fatalf("missing gzip magic: %x", data[:min(2, len(data))])
+	if len(data) < 4 || string(data[:4]) != "AVS2" {
+		t.Fatalf("missing AVS2 magic: %x", data[:min(4, len(data))])
 	}
 }
 

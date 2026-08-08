@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -11,9 +12,12 @@ import (
 	"github.com/cswink267/agent-vault/internal/security"
 )
 
-func (v *Vault) WriteSnapshot(actor string, w io.Writer) error {
+func (v *Vault) WriteSnapshot(actor, snapshotPassphrase string, w io.Writer) error {
 	if v.Sealed() {
 		return ErrSealed
+	}
+	if err := security.ValidatePassphrase(snapshotPassphrase); err != nil {
+		return err
 	}
 	unsealPath := filepath.Join(v.dataDir, "unseal.key")
 	if _, err := os.Stat(unsealPath); err != nil {
@@ -47,7 +51,15 @@ func (v *Vault) WriteSnapshot(actor string, w io.Writer) error {
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 		Source:    actor,
 	}
-	if err := backup.WriteSnapshotTarGz(w, tmpPath, unsealPath, manifest); err != nil {
+	var tarBuf bytes.Buffer
+	if err := backup.WriteSnapshotTarGz(&tarBuf, tmpPath, unsealPath, manifest); err != nil {
+		return err
+	}
+	sealed, err := backup.SealSnapshotArchive(snapshotPassphrase, tarBuf.Bytes())
+	if err != nil {
+		return err
+	}
+	if _, err := w.Write(sealed); err != nil {
 		return err
 	}
 	return v.store.AppendAudit(actor, "backup_snapshot", "")

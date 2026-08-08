@@ -71,12 +71,12 @@ func TestDownloadSnapshotAndExport(t *testing.T) {
 	}
 
 	var snap bytes.Buffer
-	if err := c.DownloadSnapshot(&snap); err != nil {
+	if err := c.DownloadSnapshot("snapshot-passphrase", &snap); err != nil {
 		t.Fatalf("DownloadSnapshot: %v", err)
 	}
 	data := snap.Bytes()
-	if len(data) < 2 || data[0] != 0x1f || data[1] != 0x8b {
-		t.Fatalf("snapshot missing gzip magic")
+	if len(data) < 4 || string(data[:4]) != "AVS2" {
+		t.Fatalf("snapshot missing AVS2 magic")
 	}
 
 	var export bytes.Buffer
@@ -93,12 +93,12 @@ func TestHealthUnlockLockListDeleteAuditCreateToken(t *testing.T) {
 	c, cleanup := setupTestServer(t)
 	defer cleanup()
 
-	ok, sealed, err := c.Health()
+	ok, _, err := c.Health()
 	if err != nil {
 		t.Fatalf("Health: %v", err)
 	}
-	if !ok || sealed {
-		t.Fatalf("Health ok=%v sealed=%v", ok, sealed)
+	if !ok {
+		t.Fatalf("Health ok=%v", ok)
 	}
 
 	sec := vault.Secret{Name: "k", Type: "api_key", Secret: "v"}
@@ -138,11 +138,11 @@ func TestHealthUnlockLockListDeleteAuditCreateToken(t *testing.T) {
 		t.Fatal("Audit: expected rows")
 	}
 
-	token, label, err := c.CreateToken("hermes")
+	token, label, scope, err := c.CreateToken("hermes", "agent")
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}
-	if token == "" || label != "hermes" {
-		t.Fatalf("CreateToken token=%q label=%q", token, label)
+	if token == "" || label != "hermes" || scope != "agent" {
+		t.Fatalf("CreateToken token=%q label=%q scope=%q", token, label, scope)
 	}
 }
